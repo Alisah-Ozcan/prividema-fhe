@@ -54,11 +54,12 @@ int const_mult_ggsw(const MODULE* module, GGSWCiphertext* result, const GGSWCiph
 /**
  * @brief Adds two GGSW ciphertexts in the DFT space  that have the same parameters
  *
+ * @param module       Additional backend information
  * @param result_dft   The resulting GGSWCiphertextDFT
  * @param ggsw_lhs_dft One of the input GGSWCiphertextDFT.
  * @param ggsw_rhs_dft The other GGSWCiphertextDFT.
  */
-void add_ggsw_dft(GGSWCiphertextDFT* result_dft, const GGSWCiphertextDFT* ggsw_lhs_dft,
+void add_ggsw_dft(const MODULE* module, GGSWCiphertextDFT* result_dft, const GGSWCiphertextDFT* ggsw_lhs_dft,
                   const GGSWCiphertextDFT* ggsw_rhs_dft);
 
 /**

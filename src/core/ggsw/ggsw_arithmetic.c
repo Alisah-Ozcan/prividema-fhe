@@ -85,11 +85,12 @@ cleanup:
 	return status;
 }
 
-void add_ggsw_dft(GGSWCiphertextDFT* result_dft, const GGSWCiphertextDFT* ggsw_lhs_dft,
+void add_ggsw_dft(const MODULE* module, GGSWCiphertextDFT* result_dft, const GGSWCiphertextDFT* ggsw_lhs_dft,
                   const GGSWCiphertextDFT* ggsw_rhs_dft)
 {
-	for (uint64_t t = 0; t < ggsw_coef_number(result_dft->params); t++)
-		result_dft->mat[t] = ggsw_lhs_dft->mat[t] + ggsw_rhs_dft->mat[t];
+	pvda_vec_dft_add(module, result_dft->mat, ggsw_total_n_glwe_limbs(result_dft->params), ggsw_lhs_dft->mat,
+	                 ggsw_total_n_glwe_limbs(ggsw_lhs_dft->params), ggsw_rhs_dft->mat,
+	                 ggsw_total_n_glwe_limbs(ggsw_rhs_dft->params));
 }
 
 int const_mult_ggsw_dft(const MODULE* module, GGSWCiphertextDFT* result_dft, const GGSWCiphertextDFT* ggsw_dft,

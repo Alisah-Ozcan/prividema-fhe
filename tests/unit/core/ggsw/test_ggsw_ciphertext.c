@@ -299,7 +299,7 @@ PvdaParamTest(add_ggsw_dft, basic, default_params_fn)
 	uniform_random_vec_znx_dft(module, ggsw_rhs_dft->mat, ggsw_total_n_glwe_limbs(params_ggsw), params_glwe->kappa - 1);
 
 	// Computes ggsw_lhs_dft + ggsw_rhs_dft
-	add_ggsw_dft(sum_computed_dft, ggsw_lhs_dft, ggsw_rhs_dft);
+	add_ggsw_dft(module, sum_computed_dft, ggsw_lhs_dft, ggsw_rhs_dft);
 
 	uint64_t nb_rows = ggsw_num_rows(params_ggsw);
 	uint64_t nb_cols = glwe_params_n_limbs(params_glwe);

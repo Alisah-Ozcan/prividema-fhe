@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "rng.h"
 #include "utils.h"
 #include "vec_znx_arithmetic.h"
 
@@ -177,10 +176,10 @@ int pvda_vec_znx_sub(const MODULE* module, int64_t* res, uint64_t res_size, uint
 	vec_znx_sub(module, res, res_size, res_sl, a, a_size, a_sl, b, b_size, b_sl);
 	return 1;
 }
-/*
-int pvda_vec_rnx_negate(const MODULE* module, double* res, uint64_t res_size, uint64_t res_sl, const double* a,
-                        uint64_t a_size, uint64_t a_sl)
+
+int pvda_vec_dft_add(const MODULE* module, VEC_ZNX_DFT* res, uint64_t res_size, const VEC_ZNX_DFT* a, uint64_t a_size,
+                     const VEC_ZNX_DFT* b, uint64_t b_size)
 {
-    vec_rnx_negate(module, res, res_size, res_sl, a, a_size, a_sl);
-    return 1;
-}*/
+	vec_dft_add(module, res, res_size, a, a_size, b, b_size);
+	return 0;
+}

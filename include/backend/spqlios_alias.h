@@ -117,5 +117,8 @@ int pvda_vec_znx_sub(const MODULE* module, int64_t* res, uint64_t res_size, uint
 
 uint64_t pvda_module_extract_nn(const MODULE* module);
 
+int pvda_vec_dft_add(const MODULE* module, VEC_ZNX_DFT* res, uint64_t res_size, const VEC_ZNX_DFT* a, uint64_t a_size,
+                     const VEC_ZNX_DFT* b, uint64_t b_size);
+
 /**@}*/
 #endif
