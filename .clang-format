@@ -24,7 +24,7 @@ UseTab: ForIndentation
 # Self explanatory
 AlignConsecutiveMacros : AcrossEmptyLines
 AlignConsecutiveAssignments: Consecutive
-AlignTrailingComments: Always
+AlignTrailingComments: true
 AlignOperands: AlignAfterOperator
 
 # Align arguments after an open bracket. e.g parameters of a long function
