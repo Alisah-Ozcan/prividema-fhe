@@ -125,7 +125,7 @@ int32_t i32_round_up_div(int32_t num, int32_t step);
  * @param step The divisior
  *
  */
-#define INT_ROUND_UP_DIV(num, step) _Generic((num), uint64_t: u64_round_up_div, int32_t: i32_round_up_div)(num, step)
+#define INT_ROUND_UP_DIV(num, step) _Generic((num), uint64_t : u64_round_up_div, int32_t : i32_round_up_div)(num, step)
 
 uint64_t next_pow2_log(uint64_t num);
 

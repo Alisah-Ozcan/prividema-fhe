@@ -20,3 +20,10 @@ target_include_directories(PVDA_BACKEND
     PRIVATE
         ${PROJECT_SOURCE_DIR}/spqlios-arithmetic/spqlios/arithmetic/  # Internal headers only
 )
+
+# ----------------------------------------
+# GPU backend (optional, requires CUDA)
+# ----------------------------------------
+if(ENABLE_CUDA)
+    add_subdirectory(gpu)
+endif()

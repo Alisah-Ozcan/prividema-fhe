@@ -78,3 +78,47 @@ BuildUnitTests(TEST_COMMON_FILES  PVDA_COMMON)
 BuildUnitTests(TEST_GGSW_FILES    PVDA_CORE)
 BuildUnitTests(TEST_GLWE_FILES    PVDA_CORE)
 BuildUnitTests(TEST_SCHEMES_FILES PVDA_SCHEMES)
+
+# ------------------------------------------------------------
+# CUDA GPU tests (only when ENABLE_CUDA=ON)
+# ------------------------------------------------------------
+if(ENABLE_CUDA)
+
+  file(GLOB TEST_GPU_FILES backend/test_gpu*.c)
+
+  function(BuildCudaTests testfiles)
+    foreach(test_file IN LISTS ${testfiles})
+      get_filename_component(test_name ${test_file} NAME_WE)
+
+      add_executable(${test_name} ${test_file})
+
+      set_target_properties(${test_name} PROPERTIES
+          CUDA_RESOLVE_DEVICE_SYMBOLS ON
+      )
+
+      target_include_directories(${test_name} PRIVATE
+          ${PROJECT_SOURCE_DIR}/include
+          ${PROJECT_SOURCE_DIR}/include/backend
+          utils/include
+      )
+
+      target_link_libraries(${test_name} PRIVATE
+          PVDA_GPU
+          PVDA_BACKEND
+          PVDA_COMMON
+          libspqlios
+          PkgConfig::CRITERION
+          CUDA::cudart
+      )
+
+      if(NEED_MATH_LIB)
+        target_link_libraries(${test_name} PRIVATE m)
+      endif()
+
+      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+    endforeach()
+  endfunction()
+
+  BuildCudaTests(TEST_GPU_FILES)
+
+endif()

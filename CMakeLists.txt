@@ -42,6 +42,7 @@ option(PROFILING_OPTIONS "Add options to allow for proper profiling even in real
 option(BUILD_NATIVE "Enable march=native optimisations" OFF)
 option(ENABLE_DEBUG "Enable additional prints for debugging purpose" OFF)
 option(BUILD_DOCS "Build the documentation using Doxygen" OFF)
+option(ENABLE_CUDA "Enable CUDA GPU backend" OFF)
 
 # ----------------------------------------
 # Debug print configuration
@@ -79,6 +80,19 @@ if(BUILD_NATIVE)
 
 endif()
 
+# ----------------------------------------
+# CUDA configuration
+# ----------------------------------------
+if(ENABLE_CUDA)
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  message(STATUS "CUDA enabled — toolkit version: ${CUDAToolkit_VERSION}")
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    # Cover Maxwell (52) through Hopper (90); override with -DCMAKE_CUDA_ARCHITECTURES=<sm>
+    set(CMAKE_CUDA_ARCHITECTURES 52 60 70 75 80 86 89 90)
+  endif()
+endif()
+
 include(CheckIPOSupported)
 check_ipo_supported(RESULT lto_supported OUTPUT lto_error)
 
@@ -96,11 +110,14 @@ endif()
 set(ENABLE_TESTING OFF CACHE BOOL "Disable Tests" FORCE)
 add_subdirectory(spqlios-arithmetic)
 
-# Enable LTO after external dependencies
-if(lto_supported)
+# Enable LTO after external dependencies.
+# Disabled when ENABLE_CUDA=ON: CUDA fat-binary symbols conflict with GCC LTO.
+if(lto_supported AND NOT ENABLE_CUDA)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
   add_compile_options(-flto)
   add_link_options(-flto)
+elseif(ENABLE_CUDA)
+  message(STATUS "LTO disabled — incompatible with CUDA fat-binary linking")
 endif()
 
 # ----------------------------------------
@@ -140,6 +157,38 @@ endif()
 # ----------------------------------------
 # Doxygen documentation
 # ----------------------------------------
+# ----------------------------------------
+# clang-format target
+# ----------------------------------------
+find_program(CLANG_FORMAT_EXE clang-format)
+if(CLANG_FORMAT_EXE)
+  file(GLOB_RECURSE ALL_SOURCE_FILES
+    ${PROJECT_SOURCE_DIR}/src/*.c
+    ${PROJECT_SOURCE_DIR}/src/*.cpp
+    ${PROJECT_SOURCE_DIR}/src/*.cu
+    ${PROJECT_SOURCE_DIR}/include/*.h
+    ${PROJECT_SOURCE_DIR}/include/*.hpp
+    ${PROJECT_SOURCE_DIR}/include/*.cuh
+    ${PROJECT_SOURCE_DIR}/tests/*.c
+    ${PROJECT_SOURCE_DIR}/tests/*.cpp
+    ${PROJECT_SOURCE_DIR}/tests/*.cu
+    ${PROJECT_SOURCE_DIR}/examples/*.c
+    ${PROJECT_SOURCE_DIR}/examples/*.cpp
+  )
+  add_custom_target(format
+    COMMAND ${CLANG_FORMAT_EXE} -i ${ALL_SOURCE_FILES}
+    COMMENT "Running clang-format on all source files"
+    VERBATIM
+  )
+  add_custom_target(format-check
+    COMMAND ${CLANG_FORMAT_EXE} --dry-run --Werror ${ALL_SOURCE_FILES}
+    COMMENT "Checking clang-format compliance (no files modified)"
+    VERBATIM
+  )
+else()
+  message(STATUS "clang-format not found — format/format-check targets unavailable")
+endif()
+
 if(BUILD_DOCS)
   find_package(Doxygen REQUIRED)
   if(DOXYGEN_FOUND)
