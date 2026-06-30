@@ -1,16 +1,18 @@
 cmake_minimum_required(VERSION 3.10)
 
-set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "Disable Google Benchmark's internal tests" FORCE)
-# Google bencmakrk
+# These must be set before FetchContent_MakeAvailable so benchmark's own
+# CMakeLists sees them during configure — setting them after is too late.
+set(BENCHMARK_ENABLE_TESTING      OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_GTEST_TESTS  OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_ASSEMBLY_TESTS OFF CACHE BOOL "" FORCE)
+
 include(FetchContent)
 FetchContent_Declare(
   benchmark
   GIT_REPOSITORY https://github.com/google/benchmark.git
   GIT_TAG        v1.9.5
-  CMAKE_ARGS     -DBENCHMARK_ENABLE_GTEST_TESTS=OFF -DBENCHMARK_ENABLE_ASSEMBLY_TESTS=OFF
 )
 FetchContent_MakeAvailable(benchmark)
-set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 
 # Collect all test source files
 file(GLOB BENCH_FILES bench*.c bench*.cpp)
