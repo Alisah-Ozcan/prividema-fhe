@@ -91,6 +91,28 @@ if(ENABLE_CUDA)
     # Cover Maxwell (52) through Hopper (90); override with -DCMAKE_CUDA_ARCHITECTURES=<sm>
     set(CMAKE_CUDA_ARCHITECTURES 52 60 70 75 80 86 89 90)
   endif()
+
+  # ----------------------------------------
+  # GPU-NTT (third-party, CUDA NTT library)
+  # ----------------------------------------
+  set(GPUNTT_BUILD_EXAMPLES  OFF CACHE BOOL "" FORCE)
+  set(GPUNTT_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+
+  # GPU-NTT's CMakeLists uses ${GPUNTT_SOURCE_DIR} internally (not set by FetchContent).
+  # FetchContent places sources at ${FETCHCONTENT_BASE_DIR}/gpuntt-src — pre-set the var.
+  if(NOT FETCHCONTENT_BASE_DIR)
+    set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps" CACHE PATH "" FORCE)
+  endif()
+  set(GPUNTT_SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/gpuntt-src" CACHE INTERNAL "")
+
+  FetchContent_Declare(
+    gpuntt
+    GIT_REPOSITORY https://github.com/Alisah-Ozcan/GPU-NTT.git
+    GIT_TAG        main
+    GIT_SHALLOW    TRUE
+  )
+  FetchContent_MakeAvailable(gpuntt)
+  message(STATUS "GPU-NTT fetched — target: GPUNTT::ntt")
 endif()
 
 include(CheckIPOSupported)

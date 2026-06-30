@@ -22,4 +22,4 @@ target_include_directories(PVDA_GPU
         ${PROJECT_SOURCE_DIR}/include/backend   # consumers: #include "gpu/host/poly_add_host.h"
 )
 
-target_link_libraries(PVDA_GPU PUBLIC CUDA::cudart)
+target_link_libraries(PVDA_GPU PUBLIC CUDA::cudart GPUNTT::ntt)
