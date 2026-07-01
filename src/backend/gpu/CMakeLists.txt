@@ -8,6 +8,7 @@
 # ----------------------------------------
 
 add_library(PVDA_GPU STATIC
+    common/gpu_nttparameters.cu
     kernel/poly_add_kernel.cu
     host/poly_add_host.cu
 )
