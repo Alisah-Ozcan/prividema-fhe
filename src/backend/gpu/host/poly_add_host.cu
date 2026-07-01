@@ -9,17 +9,11 @@ static int launch_poly_add(const Data64* a, const Data64* b, Data64* c,
                             uint64_t n, Modulus64 modulus,
                             cudaEvent_t ev_start, cudaEvent_t ev_stop)
 {
-    Data64 *d_a = nullptr, *d_b = nullptr, *d_c = nullptr;
-    size_t bytes = n * sizeof(Data64);
-
     try
     {
-        CUDA_CHECK(cudaMalloc(&d_a, bytes));
-        CUDA_CHECK(cudaMalloc(&d_b, bytes));
-        CUDA_CHECK(cudaMalloc(&d_c, bytes));
-
-        CUDA_CHECK(cudaMemcpy(d_a, a, bytes, cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_b, b, bytes, cudaMemcpyHostToDevice));
+        VEC_GPU<Data64> d_a(a, n);
+        VEC_GPU<Data64> d_b(b, n);
+        VEC_GPU<Data64> d_c(n);
 
         if (ev_start) cudaEventRecord(ev_start);
 
@@ -36,19 +30,13 @@ static int launch_poly_add(const Data64* a, const Data64* b, Data64* c,
         }
 
         CUDA_CHECK(cudaGetLastError());
-        CUDA_CHECK(cudaMemcpy(c, d_c, bytes, cudaMemcpyDeviceToHost));
+        d_c.copy_to_host(c, n);
     }
     catch (const CudaException& e)
     {
-        cudaFree(d_a);
-        cudaFree(d_b);
-        cudaFree(d_c);
         return -1;
     }
 
-    cudaFree(d_a);
-    cudaFree(d_b);
-    cudaFree(d_c);
     return 0;
 }
 
