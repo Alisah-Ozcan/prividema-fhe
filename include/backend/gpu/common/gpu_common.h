@@ -4,11 +4,11 @@
 #ifdef __CUDACC__
 #include <cuda_runtime.h>
 
-#include <stdexcept>
-#include <string>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
+#include <string>
 
 class CudaException : public std::exception {
    public:
@@ -34,7 +34,7 @@ class CudaException : public std::exception {
 		}                                                   \
 	} while (0)
 
-bool is_gpu_device_pointer(const void* ptr)
+inline bool is_gpu_device_pointer(const void* ptr)
 {
 	if (ptr == nullptr)
 	{
@@ -61,8 +61,7 @@ bool is_gpu_device_pointer(const void* ptr)
 }
 
 template <typename T>
-class VEC_GPU
-{
+class VEC_GPU {
    public:
 	VEC_GPU() : d_ptr_(nullptr), size_(0) {}
 
@@ -101,14 +100,13 @@ class VEC_GPU
 			(void)cudaFree(d_ptr_);
 		}
 		d_ptr_ = nullptr;
-		size_ = 0;
+		size_  = 0;
 	}
 
 	void allocate(size_t size)
 	{
 		reset();
-		if (size == 0)
-			return;
+		if (size == 0) return;
 		CUDA_CHECK(cudaMalloc((void**)&d_ptr_, size * sizeof(T)));
 		size_ = size;
 	}
@@ -125,15 +123,13 @@ class VEC_GPU
 			fprintf(stderr, "VEC_GPU::copy_from_host: null host pointer\n");
 			abort();
 		}
-		if (size_ != size)
-			allocate(size);
+		if (size_ != size) allocate(size);
 		CUDA_CHECK(cudaMemcpy(d_ptr_, host_ptr, size * sizeof(T), cudaMemcpyHostToDevice));
 	}
 
 	void copy_to_host(T* host_ptr, size_t size) const
 	{
-		if (size == 0)
-			return;
+		if (size == 0) return;
 		if (!host_ptr)
 		{
 			fprintf(stderr, "VEC_GPU::copy_to_host: null host pointer\n");
@@ -147,7 +143,7 @@ class VEC_GPU
 		CUDA_CHECK(cudaMemcpy(host_ptr, d_ptr_, size * sizeof(T), cudaMemcpyDeviceToHost));
 	}
 
-	T*     data() const { return d_ptr_; }
+	T* data() const { return d_ptr_; }
 	size_t size() const { return size_; }
 
 	explicit operator bool() const { return d_ptr_ != nullptr; }
@@ -157,8 +153,7 @@ class VEC_GPU
    private:
 	void copy_from(const VEC_GPU& other)
 	{
-		if (!other.d_ptr_ || other.size_ == 0)
-			return;
+		if (!other.d_ptr_ || other.size_ == 0) return;
 		allocate(other.size_);
 		CUDA_CHECK(cudaMemcpy(d_ptr_, other.d_ptr_, other.size_ * sizeof(T), cudaMemcpyDeviceToDevice));
 	}
@@ -171,7 +166,7 @@ class VEC_GPU
 		other.size_  = 0;
 	}
 
-	T*     d_ptr_;
+	T* d_ptr_;
 	size_t size_;
 };
 

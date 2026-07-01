@@ -19,7 +19,8 @@ int gpu_poly_add_mod(const uint64_t* a, const uint64_t* b, uint64_t* c, uint64_t
  * (excludes host-to-device and device-to-host memory transfers).
  * @return 0 on success, -1 on CUDA error
  */
-int gpu_poly_add_mod_timed(const uint64_t* a, const uint64_t* b, uint64_t* c, uint64_t n, uint64_t q, float* gpu_kernel_ms);
+int gpu_poly_add_mod_timed(const uint64_t* a, const uint64_t* b, uint64_t* c, uint64_t n, uint64_t q,
+                           float* gpu_kernel_ms);
 
 #ifdef __cplusplus
 }
