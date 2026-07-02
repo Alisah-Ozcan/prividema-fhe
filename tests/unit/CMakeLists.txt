@@ -22,6 +22,7 @@ endif()
 # ------------------------------------------------------------
 
 file(GLOB TEST_BACKEND_FILES backend/*.c)
+file(GLOB TEST_AVX_BACKEND_FILES backend/test_avx*.c)
 file(GLOB TEST_COMMON_FILES  common/*.c)
 file(GLOB TEST_GGSW_FILES core/ggsw/*.c)
 file(GLOB TEST_GLWE_FILES core/glwe/*.c)
@@ -74,10 +75,11 @@ endfunction()
 # Build all unit tests
 # ------------------------------------------------------------
 
-BuildUnitTests(TEST_COMMON_FILES  PVDA_COMMON)
-BuildUnitTests(TEST_GGSW_FILES    PVDA_CORE)
-BuildUnitTests(TEST_GLWE_FILES    PVDA_CORE)
-BuildUnitTests(TEST_SCHEMES_FILES PVDA_SCHEMES)
+BuildUnitTests(TEST_COMMON_FILES      PVDA_COMMON)
+BuildUnitTests(TEST_AVX_BACKEND_FILES PVDA_COMMON)
+BuildUnitTests(TEST_GGSW_FILES        PVDA_CORE)
+BuildUnitTests(TEST_GLWE_FILES        PVDA_CORE)
+BuildUnitTests(TEST_SCHEMES_FILES     PVDA_SCHEMES)
 
 # ------------------------------------------------------------
 # CUDA GPU tests (only when ENABLE_CUDA=ON)
@@ -104,6 +106,7 @@ if(ENABLE_CUDA)
 
       target_link_libraries(${test_name} PRIVATE
           PVDA_GPU
+          PVDA_CORE
           PVDA_BACKEND
           PVDA_COMMON
           libspqlios
@@ -120,5 +123,13 @@ if(ENABLE_CUDA)
   endfunction()
 
   BuildCudaTests(TEST_GPU_FILES)
+
+  # test_ggsw_external_product also has an #ifdef ENABLE_CUDA GPU variant —
+  # add GPU linking to that specific target (already created by BuildUnitTests above).
+  target_link_libraries(test_ggsw_external_product PRIVATE PVDA_GPU CUDA::cudart)
+  target_compile_definitions(test_ggsw_external_product PRIVATE ENABLE_CUDA)
+  target_include_directories(test_ggsw_external_product PRIVATE
+      ${PROJECT_SOURCE_DIR}/include/backend
+  )
 
 endif()

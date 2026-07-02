@@ -13,6 +13,44 @@
 #include "test_utils.h"
 #include "univariate_polynomial.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/common/gpu_nttparameters.h"
+#include "gpu/host/ggsw_external_product_gpu.h"
+#endif
+
+#define TIMING
+// ---------------------------------------------------------------------------
+// Timing helpers — enabled with -DTIMING (cmake -DTIMING=ON)
+// ---------------------------------------------------------------------------
+#ifdef TIMING
+#include <stdio.h>
+#include <time.h>
+
+#define PVDA_TIME_START(label) \
+    struct timespec _ts_start_##label; \
+    clock_gettime(CLOCK_MONOTONIC, &_ts_start_##label)
+
+#define PVDA_TIME_END(label, pglwe, pggsw) \
+    do { \
+        struct timespec _ts_end_##label; \
+        clock_gettime(CLOCK_MONOTONIC, &_ts_end_##label); \
+        double _ms_##label = (_ts_end_##label.tv_sec  - _ts_start_##label.tv_sec)  * 1e3 \
+                           + (_ts_end_##label.tv_nsec - _ts_start_##label.tv_nsec) * 1e-6; \
+        fprintf(stderr, \
+                "[TIMING] " #label \
+                " (n=%llu, k=%llu, kappa=%llu, limbs=%llu, limbs_tilde=%llu): %.3f ms\n", \
+                (unsigned long long)(pglwe)->nn, \
+                (unsigned long long)(pglwe)->k, \
+                (unsigned long long)(pglwe)->kappa, \
+                (unsigned long long)(pglwe)->ciphertext_nb_limbs, \
+                (unsigned long long)(pggsw)->ciphertext_nb_limbs_tilde, \
+                _ms_##label); \
+    } while (0)
+#else
+#define PVDA_TIME_START(label)              ((void)0)
+#define PVDA_TIME_END(label, pglwe, pggsw)  ((void)0)
+#endif
+
 /** The test is done without error, it is a proof of concept*/
 PvdaParamTest(ggsw_external_product, without_error, default_params_fn)
 {
@@ -52,7 +90,9 @@ PvdaParamTest(ggsw_external_product, without_error, default_params_fn)
 
 	// Computes the external product of glwe_tilde and ggsw
 	// It should result in a bivGLWE(u*m) using the base-2Kappa decomposition
+	PVDA_TIME_START(cpu_external_product);
 	ggsw_unprepared_external_product(module, ext_prod_observed, glwe_tilde, ggsw);
+	PVDA_TIME_END(cpu_external_product, params_glwe, params_ggsw);
 	normalize_glwe(module, ext_prod_observed, ext_prod_observed);
 	glwe_secret_decrypt(module, phase_observed, sk_glwe_prep, ext_prod_observed);
 	biv_to_univ_rnx(params_glwe, um_observed_univ_rnx, phase_observed);
@@ -86,3 +126,97 @@ PvdaParamTest(ggsw_external_product, without_error, default_params_fn)
 
 	DELETE_PVDA_PARAMS_GGSW;
 }
+
+#ifdef ENABLE_CUDA
+/** GPU variant: external product runs on GPU, normalize + decrypt on CPU */
+PvdaParamTest(ggsw_external_product, gpu_without_error, default_params_fn)
+{
+	INIT_PVDA_PARAMS_GGSW(param);
+
+	params_glwe->fast_uniform_nb_bits = 0;
+	sigma                             = 0;
+	double err_length                 = glwe_bivariate_epsilon(params_glwe) + 3 * sigma + 3 * DBL_EPSILON;
+	double critical_err_length        = glwe_bivariate_epsilon(params_glwe) + 5 * sigma + 5 * DBL_EPSILON;
+
+	GLWESecretKey* sk_ggsw              = alloc_glwe_secret_key(params_glwe);
+	GLWESecretKeyPrepared* sk_glwe_prep = alloc_glwe_secret_key_prepared(params_glwe);
+	GGSWCiphertext* ggsw                = new_ggsw(params_ggsw);
+	GLWECiphertext* glwe_tilde          = new_glwe(params_glwe);
+	GLWECiphertext* ext_prod_observed   = new_glwe(params_glwe);
+	PolyUniv* u_univ                    = new_univ(params_glwe);
+	PolyBiv* m                          = new_biv(params_glwe);
+
+	PolyBiv* phase_observed           = new_biv(params_glwe);
+	PolyUnivRnX* um_observed_univ_rnx = new_univ_rnx(params_glwe);
+	PolyUnivDFT* u_univ_dft           = new_univ_dft(module);
+	PolyBivDFT* um_dft                = new_biv_dft(params_glwe);
+	PolyBiv* um                       = new_biv(params_glwe);
+	PolyUnivRnX* um_univ_rnx          = new_univ_rnx(params_glwe);
+
+	uniform_glwe_secret_key(module, sk_ggsw, 3);
+	glwe_sk_prepare(module, sk_glwe_prep, sk_ggsw);
+
+	uniform_random_pol_znx(u_univ, params_glwe->nn, params_glwe->kappa);
+	uniform_random_biv_poly(params_glwe, m, 1);
+
+	glwe_secret_encrypt_phase(module, glwe_tilde, sk_glwe_prep, m);
+	ggsw_secret_encrypt(module, ggsw, sk_glwe_prep, u_univ);
+
+	// GPU external product:
+	// Upload ciphertexts, run NTT-based VMP on device, download result.
+	gpu_ntt_initialize(params_glwe->nn);
+	//PVDA_TIME_START(gpu_external_product);
+	size_t result_elems              = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
+	GLWECiphertext gpu_glwe_tilde    = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_tilde)};
+	GGSWCiphertext gpu_ggsw          = {.params = params_ggsw, .mat = pvda_ggsw_to_device(ggsw)};
+	GLWECiphertext gpu_result        = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
+
+	cr_assert_not_null(gpu_glwe_tilde.vec, "pvda_glwe_to_device failed");
+	cr_assert_not_null(gpu_ggsw.mat,       "pvda_ggsw_to_device failed");
+	cr_assert_not_null(gpu_result.vec,     "pvda_gpu_alloc for result failed");
+
+	PVDA_TIME_START(gpu_external_product);
+	ggsw_unprepared_external_product(module, &gpu_result, &gpu_glwe_tilde, &gpu_ggsw);
+	PVDA_TIME_END(gpu_external_product, params_glwe, params_ggsw);
+
+	// Download result then normalize and decrypt on CPU
+	pvda_glwe_from_device(ext_prod_observed, gpu_result.vec);
+	//PVDA_TIME_END(gpu_external_product, params_glwe, params_ggsw);
+	normalize_glwe(module, ext_prod_observed, ext_prod_observed);
+	glwe_secret_decrypt(module, phase_observed, sk_glwe_prep, ext_prod_observed);
+	biv_to_univ_rnx(params_glwe, um_observed_univ_rnx, phase_observed);
+
+	// Reference: u*m computed manually
+	univ_coefs_to_dft(module, u_univ_dft, u_univ);
+	pvda_svp_apply_dft(module, um_dft, ggsw_params_l_tilde_a(params_ggsw), u_univ_dft, m);
+	biv_dft_to_coefs(module, params_glwe, um, um_dft);
+	pvda_vec_znx_normalize_base2k(module, params_glwe->kappa, um, um);
+	biv_to_univ_rnx(params_glwe, um_univ_rnx, um);
+
+	pvda_assert_polynomial_distance(params_glwe, um_observed_univ_rnx, um_univ_rnx, err_length, critical_err_length);
+
+	// Cleanup GPU buffers
+	pvda_gpu_free(gpu_glwe_tilde.vec);
+	pvda_gpu_free(gpu_ggsw.mat);
+	pvda_gpu_free(gpu_result.vec);
+
+	// Cleanup CPU allocations
+	delete_biv(m);
+	delete_univ(u_univ);
+	delete_univ_dft(u_univ_dft);
+	delete_biv(phase_observed);
+	delete_biv(um);
+	delete_univ_rnx(um_univ_rnx);
+	free(um_dft);
+	delete_univ_rnx(um_observed_univ_rnx);
+
+	delete_glwe(ext_prod_observed);
+	delete_glwe(glwe_tilde);
+	delete_ggsw(ggsw);
+
+	delete_glwe_secret_key(sk_ggsw);
+	delete_glwe_secret_key_prepared(sk_glwe_prep);
+
+	DELETE_PVDA_PARAMS_GGSW;
+}
+#endif

@@ -27,3 +27,11 @@ target_include_directories(PVDA_GGSW
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include/core/ggsw
 )
+
+if(ENABLE_CUDA)
+    target_link_libraries(PVDA_GGSW PRIVATE PVDA_GPU)
+    target_include_directories(PVDA_GGSW PRIVATE
+        ${PROJECT_SOURCE_DIR}/include/backend
+    )
+    target_compile_definitions(PVDA_GGSW PRIVATE ENABLE_CUDA)
+endif()

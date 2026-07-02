@@ -24,14 +24,14 @@ class CudaException : public std::exception {
 	    "CUDA Error in " + file_ + " at line " + std::to_string(line_) + ": " + cudaGetErrorString(error_);
 };
 
-#define CUDA_CHECK(err)                                     \
-	do                                                      \
-	{                                                       \
-		cudaError_t error = err;                            \
-		if (error != cudaSuccess)                           \
-		{                                                   \
-			throw CudaException(__FILE__, __LINE__, error); \
-		}                                                   \
+#define CUDA_CHECK(err)                                       \
+	do                                                        \
+	{                                                         \
+		cudaError_t error = err;                              \
+		if (error != cudaSuccess)                             \
+		{                                                     \
+			throw ::CudaException(__FILE__, __LINE__, error); \
+		}                                                     \
 	} while (0)
 
 inline bool is_gpu_device_pointer(const void* ptr)

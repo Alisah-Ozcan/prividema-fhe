@@ -20,6 +20,10 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/host/ggsw_external_product_gpu.h"
+#endif
+
 // bivGGSW PART (begin)
 
 int normalize_ggsw(const MODULE* module, GGSWCiphertext* result, const GGSWCiphertext* ggsw)
@@ -105,6 +109,15 @@ int ggsw_unprepared_external_product(const MODULE* module,
 	uint64_t nrows     = ggsw_num_rows(ggsw->params);
 	uint64_t ncols_in  = glwe_params_n_limbs(ggsw->params->params_glwe);
 	uint64_t ncols_out = glwe_params_n_limbs(result->params);
+
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwe->vec))
+	{
+		gpu_ggsw_external_product_device((const int64_t*)glwe->vec, (const int64_t*)ggsw->mat,
+		                                 (int64_t*)result->vec, nn, nrows, ncols_in);
+		return 0;
+	}
+#endif
 
 	MatBivDFT* ggsw_pmat  = NULL;  // Prepared bivGGSW ciphertext
 	VecBivDFT* result_dft = NULL;  // ExternalProduct(glwe, ggsw)

@@ -12,6 +12,7 @@ void gpu_ntt_initialize(size_t n);
 const uint64_t* gpu_ntt_get_table(size_t n);
 const uint64_t* gpu_ntt_get_intt_table(size_t n);
 uint64_t gpu_ntt_get_modulus(void);
+uint64_t gpu_ntt_get_n_inv(size_t n);
 
 #ifdef __cplusplus
 }
@@ -32,9 +33,8 @@ class NTTParameterGenerator {
 	void initialize(size_t size);
 
 	Root64* get_ntt_table(size_t size);
-
 	Root64* get_intt_table(size_t size);
-
+	Ninverse64 get_n_inv(size_t size);
 	Modulus64 get_modulus();
 
    private:
@@ -44,15 +44,16 @@ class NTTParameterGenerator {
 	NTTParameterGenerator(const NTTParameterGenerator&)            = delete;
 	NTTParameterGenerator& operator=(const NTTParameterGenerator&) = delete;
 
-	struct RootTables
+	struct NTTInfo
 	{
 		VEC_GPU<Root64> ntt_table_;
 		VEC_GPU<Root64> intt_table_;
+		Ninverse64 n_inv_;
 	};
 
 	const Modulus64 carrier_prime_ = Modulus64(1152921504634109953ULL);
 	const Data64 root_of_unity_    = 1341959173301ULL;
-	std::unordered_map<size_t, RootTables> cache_;
+	std::unordered_map<size_t, NTTInfo> cache_;
 	std::mutex mtx_;
 };
 
