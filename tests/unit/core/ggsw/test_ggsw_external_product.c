@@ -18,7 +18,7 @@
 #include "gpu/host/ggsw_external_product_gpu.h"
 #endif
 
-#define TIMING
+//#define TIMING
 // ---------------------------------------------------------------------------
 // Timing helpers — enabled with -DTIMING (cmake -DTIMING=ON)
 // ---------------------------------------------------------------------------
@@ -408,23 +408,25 @@ PvdaParamTest(ggsw_external_product, gpu_to_dft_without_error, default_params_fn
 	gpu_ntt_initialize(params_glwe->nn);
 	size_t result_elems = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
 
-	// GPU-backed structs: GLWE on device; GGSW NTT-prepared on device via ggsw_prepare_gpu
+	// GPU-backed structs: GLWE on device; raw GGSW uploaded then NTT-prepared via ggsw_prepare
 	GLWECiphertext gpu_glwe_tilde    = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_tilde)};
+	GGSWCiphertext gpu_ggsw          = {.params = params_ggsw, .mat = pvda_ggsw_to_device(ggsw)};
 	GGSWCiphertextPrep gpu_ggsw_prep = {.params = params_ggsw, .mat = NULL};
-	ggsw_prepare_gpu(&gpu_ggsw_prep, ggsw);
+	ggsw_prepare(module, &gpu_ggsw_prep, &gpu_ggsw);
 	// NTT-domain result buffer (int64_t on device, cast as VecBivDFT* for the struct)
 	GLWECiphertextDFT gpu_result_dft = {.params = params_glwe, .vec = (VecBivDFT*)pvda_gpu_alloc(result_elems)};
-	// Coefficient-domain output buffer (filled by glwe_dft_to_coef_gpu)
+	// Coefficient-domain output buffer (filled by glwe_dft_to_coef)
 	GLWECiphertext gpu_result_coef   = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
 
 	cr_assert_not_null(gpu_glwe_tilde.vec,  "pvda_glwe_to_device failed");
-	cr_assert_not_null(gpu_ggsw_prep.mat,   "ggsw_prepare_gpu failed");
+	cr_assert_not_null(gpu_ggsw.mat,        "pvda_ggsw_to_device failed");
+	cr_assert_not_null(gpu_ggsw_prep.mat,   "ggsw_prepare failed");
 	cr_assert_not_null(gpu_result_dft.vec,  "pvda_gpu_alloc for NTT result failed");
 	cr_assert_not_null(gpu_result_coef.vec, "pvda_gpu_alloc for coef result failed");
 
 	PVDA_TIME_START(gpu_external_product_to_dft);
 	ggsw_external_product_to_dft(module, &gpu_result_dft, &gpu_glwe_tilde, &gpu_ggsw_prep);
-	glwe_dft_to_coef_gpu(&gpu_result_coef, &gpu_result_dft);
+	glwe_dft_to_coef(module, &gpu_result_coef, &gpu_result_dft);
 	PVDA_TIME_END(gpu_external_product_to_dft, params_glwe, params_ggsw);
 	pvda_glwe_from_device(ext_prod_observed, gpu_result_coef.vec);
 
@@ -441,6 +443,7 @@ PvdaParamTest(ggsw_external_product, gpu_to_dft_without_error, default_params_fn
 	pvda_assert_polynomial_distance(params_glwe, um_observed_univ_rnx, um_univ_rnx, err_length, critical_err_length);
 
 	pvda_gpu_free(gpu_glwe_tilde.vec);
+	pvda_gpu_free(gpu_ggsw.mat);
 	pvda_gpu_free((int64_t*)gpu_ggsw_prep.mat);
 	pvda_gpu_free((int64_t*)gpu_result_dft.vec);
 	pvda_gpu_free(gpu_result_coef.vec);
@@ -502,12 +505,14 @@ PvdaParamTest(ggsw_external_product, gpu_prepared_without_error, default_params_
 	size_t result_elems = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
 
 	GLWECiphertext gpu_glwe_tilde    = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_tilde)};
+	GGSWCiphertext gpu_ggsw          = {.params = params_ggsw, .mat = pvda_ggsw_to_device(ggsw)};
 	GGSWCiphertextPrep gpu_ggsw_prep = {.params = params_ggsw, .mat = NULL};
-	ggsw_prepare_gpu(&gpu_ggsw_prep, ggsw);
+	ggsw_prepare(module, &gpu_ggsw_prep, &gpu_ggsw);
 	GLWECiphertext gpu_result = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
 
 	cr_assert_not_null(gpu_glwe_tilde.vec, "pvda_glwe_to_device failed");
-	cr_assert_not_null(gpu_ggsw_prep.mat,  "ggsw_prepare_gpu failed");
+	cr_assert_not_null(gpu_ggsw.mat,       "pvda_ggsw_to_device failed");
+	cr_assert_not_null(gpu_ggsw_prep.mat,  "ggsw_prepare failed");
 	cr_assert_not_null(gpu_result.vec,     "pvda_gpu_alloc for result failed");
 
 	PVDA_TIME_START(gpu_external_product);
@@ -528,6 +533,7 @@ PvdaParamTest(ggsw_external_product, gpu_prepared_without_error, default_params_
 	pvda_assert_polynomial_distance(params_glwe, um_observed_univ_rnx, um_univ_rnx, err_length, critical_err_length);
 
 	pvda_gpu_free(gpu_glwe_tilde.vec);
+	pvda_gpu_free(gpu_ggsw.mat);
 	pvda_gpu_free((int64_t*)gpu_ggsw_prep.mat);
 	pvda_gpu_free(gpu_result.vec);
 

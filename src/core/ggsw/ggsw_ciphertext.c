@@ -15,6 +15,10 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/host/ggsw_external_product_gpu.h"
+#endif
+
 // bivGGSW Part (begin)
 
 GGSWCiphertext* new_ggsw(const GGSWParams* params_ggsw)
@@ -161,12 +165,30 @@ cleanup:
 void delete_ggsw_prep(GGSWCiphertextPrep* ggsw_dft)
 {
 	if (!ggsw_dft) return;
+#ifdef ENABLE_CUDA
+	if (ggsw_dft->mat && pvda_is_device_pointer(ggsw_dft->mat))
+		pvda_gpu_free((int64_t*)ggsw_dft->mat);
+	else
+		free(ggsw_dft->mat);
+#else
 	free(ggsw_dft->mat);
+#endif
 	free(ggsw_dft);
 }
 
 int ggsw_prepare(const MODULE* module, GGSWCiphertextPrep* ggsw_prepared, const GGSWCiphertext* ggsw_ct)
 {
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(ggsw_ct->mat))
+	{
+		// Free pre-allocated host mat (from new_ggsw_prep) if present
+		if (ggsw_prepared->mat && !pvda_is_device_pointer(ggsw_prepared->mat))
+			free(ggsw_prepared->mat);
+		ggsw_prepare_gpu(ggsw_prepared, ggsw_ct);
+		return 0;
+	}
+#endif
+
 	int status = -1;
 
 	size_t nrows = ggsw_prepared->params->ciphertext_nb_limbs_tilde;

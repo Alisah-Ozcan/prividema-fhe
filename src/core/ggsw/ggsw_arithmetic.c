@@ -194,7 +194,7 @@ int ggsw_external_product(const MODULE* module, GLWECiphertext* result, const GL
 
 		gpu_ggsw_ext_prod_ntt_device((const int64_t*)glwe->vec, (const int64_t*)ggsw_prepared->mat,
 		                             d_tmp_ntt, nn, nrows, ncols_in);
-		glwe_dft_to_coef_gpu(result, &tmp_ntt_dft);
+		glwe_dft_to_coef(module, result, &tmp_ntt_dft);
 
 		pvda_gpu_free(d_tmp_ntt);
 		return 0;

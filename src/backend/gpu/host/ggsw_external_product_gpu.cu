@@ -132,15 +132,23 @@ void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw)
                                                  .mod_inverse    = 0,
                                                  .stream         = 0};
 
-    int64_t* d_raw = pvda_ggsw_to_device(ggsw);
+    // Accept both host and device GGSW input
+    const int64_t* d_src;
+    int64_t*       d_tmp = nullptr;
+    if (is_gpu_device_pointer(ggsw->mat)) {
+        d_src = (const int64_t*)ggsw->mat;
+    } else {
+        d_tmp = pvda_ggsw_to_device(ggsw);
+        d_src = d_tmp;
+    }
 
     // GPU_NTT output must be Data64* (unsigned); allocate separately then store as MatBivDFT*
     Data64* d_ntt = nullptr;
     CUDA_CHECK(cudaMalloc((void**)&d_ntt, nrows * ncols * n * sizeof(Data64)));
-    gpuntt::GPU_NTT((Data64s*)d_raw, d_ntt, ntt_tab, mod, cfg_fwd, (int)(nrows * ncols));
+    gpuntt::GPU_NTT((Data64s*)d_src, d_ntt, ntt_tab, mod, cfg_fwd, (int)(nrows * ncols));
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    pvda_gpu_free(d_raw);
+    if (d_tmp) pvda_gpu_free(d_tmp);
 
     gpu_prep->mat = (MatBivDFT*)d_ntt;
 }

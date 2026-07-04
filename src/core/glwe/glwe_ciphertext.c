@@ -13,6 +13,10 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/host/ggsw_external_product_gpu.h"
+#endif
+
 //! bivGLWE PART (begin)
 
 GLWECiphertext* new_glwe(const GLWEParams* params)
@@ -158,6 +162,14 @@ cleanup:
 
 int glwe_dft_to_coef(const MODULE* module, GLWECiphertext* res_ct, const GLWECiphertextDFT* glwe_dft)
 {
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwe_dft->vec))
+	{
+		glwe_dft_to_coef_gpu(res_ct, glwe_dft);
+		return 0;
+	}
+#endif
+
 	int status             = -1;
 	PolyBiv glwe_flattened = glwe_flattened_biv(res_ct);
 
