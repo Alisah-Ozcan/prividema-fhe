@@ -111,7 +111,7 @@ int ggsw_unprepared_external_product(const MODULE* module,
 	uint64_t ncols_out = glwe_params_n_limbs(result->params);
 
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwe->vec))
+	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw->mat))
 	{
 		gpu_ggsw_external_product_device((const int64_t*)glwe->vec, (const int64_t*)ggsw->mat,
 		                                 (int64_t*)result->vec, nn, nrows, ncols_in);
@@ -156,6 +156,16 @@ int ggsw_external_product_to_dft(const MODULE* module, GLWECiphertextDFT* result
 	size_t ncols_in  = glwe_params_n_limbs(ggsw_prepared->params->params_glwe);
 	size_t ncols_out = glwe_params_n_limbs(result->params);
 
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw_prepared->mat))
+	{
+		// ggsw_prepared->mat holds NTT-domain data (from ggsw_prepare_gpu); result stays NTT domain
+		gpu_ggsw_ext_prod_ntt_device((const int64_t*)glwe->vec, (const int64_t*)ggsw_prepared->mat,
+		                             (int64_t*)result->vec, nn, nrows, ncols_in);
+		return 0;
+	}
+#endif
+
 	PolyBiv glwe_flattened = glwe_flattened_biv(glwe);
 	CHECK_CALL(pvda_vmp_apply_dft(module, result->vec, ncols_out, &glwe_flattened, ggsw_prepared->mat, nrows, ncols_in),
 	           "vmp_apply_dft_p failed in ggsw_external_product");
@@ -170,6 +180,26 @@ int ggsw_external_product(const MODULE* module, GLWECiphertext* result, const GL
                           const GGSWCiphertextPrep* ggsw_prepared)
 {
 	int status = -1;
+
+	uint64_t nn     = result->params->nn;
+	uint64_t nrows  = ggsw_num_rows(ggsw_prepared->params);
+	size_t ncols_in = glwe_params_n_limbs(ggsw_prepared->params->params_glwe);
+
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw_prepared->mat))
+	{
+		// NTT-domain VMP then INTT: mirrors ggsw_external_product_to_dft + glwe_dft_to_coef on GPU
+		int64_t*          d_tmp_ntt   = pvda_gpu_alloc((size_t)ncols_in * (size_t)nn);
+		GLWECiphertextDFT tmp_ntt_dft = {.params = result->params, .vec = (VecBivDFT*)d_tmp_ntt};
+
+		gpu_ggsw_ext_prod_ntt_device((const int64_t*)glwe->vec, (const int64_t*)ggsw_prepared->mat,
+		                             d_tmp_ntt, nn, nrows, ncols_in);
+		glwe_dft_to_coef_gpu(result, &tmp_ntt_dft);
+
+		pvda_gpu_free(d_tmp_ntt);
+		return 0;
+	}
+#endif
 
 	GLWECiphertextDFT* tmp_dft = new_glwe_dft(result->params);
 	CHECK_ALLOC(tmp_dft, "Failed allocation in ggsw external product to non-dft");

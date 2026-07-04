@@ -5,9 +5,10 @@
 #include <stdint.h>
 
 // Forward declarations — avoids pulling in core headers here.
-// Compatible with GLWECiphertext / GGSWCiphertext typedefs from glwe_ciphertext.h / ggsw_ciphertext.h.
-typedef struct glwe_ciphertext GLWECiphertext;
-typedef struct ggsw_ciphertext GGSWCiphertext;
+typedef struct glwe_ciphertext           GLWECiphertext;
+typedef struct glwe_ciphertext_dft       GLWECiphertextDFT;
+typedef struct ggsw_ciphertext           GGSWCiphertext;
+typedef struct ggsw_ciphertext_prepared  GGSWCiphertextPrep;
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,6 +60,34 @@ int64_t* pvda_ggsw_to_device(const GGSWCiphertext* ggsw);
 // ---------------------------------------------------------------------------
 void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_ggsw, int64_t* d_result, size_t n,
                                       size_t nrows, size_t ncols);
+
+// ---------------------------------------------------------------------------
+// GPU prepare — NTT of the full GGSW matrix on device.
+//
+// Uploads the raw int64_t GGSW matrix to device, computes NTT of every
+// polynomial, and stores the result in gpu_prep->mat (cast as MatBivDFT*).
+// Caller must set gpu_prep->params before calling.
+// Free with pvda_gpu_free((int64_t*)gpu_prep->mat).
+// ---------------------------------------------------------------------------
+void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw);
+
+// ---------------------------------------------------------------------------
+// NTT-domain VMP — GGSW is already NTT'd, result left in NTT domain (no INTT).
+//
+// d_glwe      : [nrows * n]          — raw int64_t on device
+// d_ggsw_ntt  : [nrows * ncols * n]  — NTT-domain int64_t on device (from ggsw_prepare_gpu)
+// d_result_ntt: [ncols * n]          — NTT-domain output on device
+// ---------------------------------------------------------------------------
+void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_ntt, int64_t* d_result_ntt,
+                                   size_t n, size_t nrows, size_t ncols);
+
+// ---------------------------------------------------------------------------
+// GPU INTT — convert NTT-domain GLWECiphertextDFT to coefficient-domain GLWECiphertext.
+//
+// Both d_result->vec and d_glwe_ntt->vec must be device pointers holding int64_t.
+// Mirrors the CPU glwe_dft_to_coef for the GPU NTT path.
+// ---------------------------------------------------------------------------
+void glwe_dft_to_coef_gpu(GLWECiphertext* d_result, const GLWECiphertextDFT* d_glwe_ntt);
 
 #ifdef __cplusplus
 }
