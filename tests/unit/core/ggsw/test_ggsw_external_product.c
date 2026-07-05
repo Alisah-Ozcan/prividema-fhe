@@ -18,7 +18,7 @@
 #include "gpu/host/ggsw_external_product_gpu.h"
 #endif
 
-//#define TIMING
+#define TIMING
 // ---------------------------------------------------------------------------
 // Timing helpers — enabled with -DTIMING (cmake -DTIMING=ON)
 // ---------------------------------------------------------------------------
@@ -406,6 +406,7 @@ PvdaParamTest(ggsw_external_product, gpu_to_dft_without_error, default_params_fn
 	ggsw_secret_encrypt(module, ggsw, sk_glwe_prep, u_univ);
 
 	gpu_ntt_initialize(params_glwe->nn);
+	//PVDA_TIME_START(gpu_external_product_to_dft);
 	size_t result_elems = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
 
 	// GPU-backed structs: GLWE on device; raw GGSW uploaded then NTT-prepared via ggsw_prepare
@@ -426,9 +427,11 @@ PvdaParamTest(ggsw_external_product, gpu_to_dft_without_error, default_params_fn
 
 	PVDA_TIME_START(gpu_external_product_to_dft);
 	ggsw_external_product_to_dft(module, &gpu_result_dft, &gpu_glwe_tilde, &gpu_ggsw_prep);
-	glwe_dft_to_coef(module, &gpu_result_coef, &gpu_result_dft);
 	PVDA_TIME_END(gpu_external_product_to_dft, params_glwe, params_ggsw);
+
+	glwe_dft_to_coef(module, &gpu_result_coef, &gpu_result_dft);
 	pvda_glwe_from_device(ext_prod_observed, gpu_result_coef.vec);
+	//PVDA_TIME_END(gpu_external_product_to_dft, params_glwe, params_ggsw);
 
 	normalize_glwe(module, ext_prod_observed, ext_prod_observed);
 	glwe_secret_decrypt(module, phase_observed, sk_glwe_prep, ext_prod_observed);
@@ -502,6 +505,7 @@ PvdaParamTest(ggsw_external_product, gpu_prepared_without_error, default_params_
 	ggsw_secret_encrypt(module, ggsw, sk_glwe_prep, u_univ);
 
 	gpu_ntt_initialize(params_glwe->nn);
+	//PVDA_TIME_START(gpu_external_product);
 	size_t result_elems = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
 
 	GLWECiphertext gpu_glwe_tilde    = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_tilde)};
@@ -520,6 +524,8 @@ PvdaParamTest(ggsw_external_product, gpu_prepared_without_error, default_params_
 	PVDA_TIME_END(gpu_external_product, params_glwe, params_ggsw);
 
 	pvda_glwe_from_device(ext_prod_observed, gpu_result.vec);
+	//PVDA_TIME_END(gpu_external_product, params_glwe, params_ggsw);
+	
 	normalize_glwe(module, ext_prod_observed, ext_prod_observed);
 	glwe_secret_decrypt(module, phase_observed, sk_glwe_prep, ext_prod_observed);
 	biv_to_univ_rnx(params_glwe, um_observed_univ_rnx, phase_observed);

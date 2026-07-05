@@ -5,10 +5,12 @@
 #include <stdint.h>
 
 // Forward declarations — avoids pulling in core headers here.
-typedef struct glwe_ciphertext           GLWECiphertext;
-typedef struct glwe_ciphertext_dft       GLWECiphertextDFT;
-typedef struct ggsw_ciphertext           GGSWCiphertext;
-typedef struct ggsw_ciphertext_prepared  GGSWCiphertextPrep;
+typedef struct glwe_ciphertext                GLWECiphertext;
+typedef struct glwe_ciphertext_dft            GLWECiphertextDFT;
+typedef struct ggsw_ciphertext                GGSWCiphertext;
+typedef struct ggsw_ciphertext_prepared       GGSWCiphertextPrep;
+typedef struct glwegadget_ciphertext          GLWEGadgetCiphertext;
+typedef struct glwegadget_ciphertext_prepared GLWEGadgetCiphertextPrep;
 
 #ifdef __cplusplus
 extern "C" {
@@ -88,6 +90,41 @@ void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_n
 // Mirrors the CPU glwe_dft_to_coef for the GPU NTT path.
 // ---------------------------------------------------------------------------
 void glwe_dft_to_coef_gpu(GLWECiphertext* d_result, const GLWECiphertextDFT* d_glwe_ntt);
+
+// ---------------------------------------------------------------------------
+// GLWEGadget half-product helpers
+// ---------------------------------------------------------------------------
+
+// Allocate device buffer and upload the coefficient matrix of a GLWEGadgetCiphertext.
+// Returned pointer holds  l_tilde * ciphertext_nb_limbs * nn  int64_t values (row-major).
+int64_t* pvda_glwegadget_to_device(const GLWEGadgetCiphertext* glwegad);
+
+// NTT-prepare a GLWEGadgetCiphertext on device.
+// Uploads the raw int64_t gadget matrix, computes NTT of every polynomial,
+// and stores the result in gpu_prep->mat (cast as MatBivDFT*).
+// Caller must set gpu_prep->params before calling.
+// Free with pvda_gpu_free((int64_t*)gpu_prep->mat).
+void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadgetCiphertext* glwegad);
+
+// ---------------------------------------------------------------------------
+// GPU half-product — gadget matrix already NTT'd (from glwegadget_prepare_gpu).
+//
+// d_a          : [nrows * n]           — l_tilde coef-domain int64 polys on device
+// d_glwegad_ntt: [nrows * ncols * n]   — NTT-domain gadget matrix on device
+// d_result     : [ncols * n]           — coef-domain output (NTT + VMP + INTT)
+// ---------------------------------------------------------------------------
+void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result,
+                                      size_t n, size_t nrows, size_t ncols);
+
+// ---------------------------------------------------------------------------
+// GPU half-product leaving result in NTT domain (no INTT).
+//
+// d_a          : [nrows * n]           — l_tilde coef-domain int64 polys on device
+// d_glwegad_ntt: [nrows * ncols * n]   — NTT-domain gadget matrix on device
+// d_result_ntt : [ncols * n]           — NTT-domain output (NTT + VMP, no INTT)
+// ---------------------------------------------------------------------------
+void gpu_glwegadget_half_prod_ntt_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result_ntt,
+                                          size_t n, size_t nrows, size_t ncols);
 
 #ifdef __cplusplus
 }

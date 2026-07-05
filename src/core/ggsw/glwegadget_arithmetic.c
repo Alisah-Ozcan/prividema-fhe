@@ -19,6 +19,10 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/host/ggsw_external_product_gpu.h"
+#endif
+
 int glwegadget_half_prod(const MODULE* module, GLWECiphertext* result,
                          const GLWEGadgetCiphertextPrep* glwegadget_prep_ct, const PolyBiv* a)
 {
@@ -28,6 +32,18 @@ int glwegadget_half_prod(const MODULE* module, GLWECiphertext* result,
 	uint64_t nn      = glwegadget_prep_ct->params->params_glwe->nn;
 	size_t ncols_in  = glwe_params_n_limbs(glwegadget_prep_ct->params->params_glwe);
 	size_t ncols_out = glwe_params_n_limbs(result->params);
+
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwegadget_prep_ct->mat) && pvda_is_device_pointer(result->vec))
+	{
+		// Upload first nrows=l_tilde coef-domain limb polynomials of `a` to device
+		int64_t* d_a = pvda_gpu_upload(a->ptr, (size_t)nrows * (size_t)nn);
+		gpu_glwegadget_half_prod_device(d_a, (const int64_t*)glwegadget_prep_ct->mat,
+		                                (int64_t*)result->vec, nn, nrows, ncols_in);
+		pvda_gpu_free(d_a);
+		return 0;
+	}
+#endif
 
 	GLWECiphertextDFT* glwe_dft = new_glwe_dft(result->params);
 	CHECK_ALLOC(glwe_dft, "Allocation failed in half-product");
@@ -50,8 +66,20 @@ int glwegadget_half_prod_dft_to_dft(const MODULE* module, GLWECiphertextDFT* res
 	int status = -1;
 
 	size_t nrows     = glwegadget_prep_ct->params->l_tilde;
+	uint64_t nn      = glwegadget_prep_ct->params->params_glwe->nn;
 	size_t ncols_in  = glwe_params_n_limbs(glwegadget_prep_ct->params->params_glwe);
 	size_t ncols_out = glwe_params_n_limbs(result_dft->params);
+
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwegadget_prep_ct->mat) && pvda_is_device_pointer(result_dft->vec)
+	    && pvda_is_device_pointer(a_dft))
+	{
+		// a_dft is device pointer to nrows=l_tilde coef-domain int64 polys; NTT applied inside
+		gpu_glwegadget_half_prod_ntt_device((const int64_t*)a_dft, (const int64_t*)glwegadget_prep_ct->mat,
+		                                    (int64_t*)result_dft->vec, nn, nrows, ncols_in);
+		return 0;
+	}
+#endif
 
 	CHECK_CALL(pvda_vmp_apply_dft_to_dft(module, result_dft->vec, ncols_out, (double*)a_dft, nrows,
 	                                     glwegadget_prep_ct->mat, nrows, ncols_in),
@@ -68,8 +96,20 @@ int glwegadget_half_prod_prepared_to_dft(const MODULE* module, GLWECiphertextDFT
 	int status = -1;
 
 	size_t nrows     = glwegadget_prep_ct->params->l_tilde;
+	uint64_t nn      = glwegadget_prep_ct->params->params_glwe->nn;
 	size_t ncols_in  = glwe_params_n_limbs(glwegadget_prep_ct->params->params_glwe);
 	size_t ncols_out = glwe_params_n_limbs(result_dft->params);
+
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwegadget_prep_ct->mat) && pvda_is_device_pointer(result_dft->vec)
+	    && pvda_is_device_pointer(a_prep))
+	{
+		// a_prep is device pointer to nrows=l_tilde coef-domain int64 polys; NTT applied inside
+		gpu_glwegadget_half_prod_ntt_device((const int64_t*)a_prep, (const int64_t*)glwegadget_prep_ct->mat,
+		                                    (int64_t*)result_dft->vec, nn, nrows, ncols_in);
+		return 0;
+	}
+#endif
 
 	CHECK_CALL(pvda_vmp_apply_prepared_to_dft(module, result_dft->vec, ncols_out, (double*)a_prep, nrows,
 	                                          glwegadget_prep_ct->mat, nrows, ncols_in),

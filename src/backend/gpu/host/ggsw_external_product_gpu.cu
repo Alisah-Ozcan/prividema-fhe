@@ -3,6 +3,7 @@
 
 #include "core/ggsw/ggsw_ciphertext.h"
 #include "core/ggsw/ggsw_params.h"
+#include "core/ggsw/glwegadget_ciphertext.h"
 #include "core/glwe/glwe_ciphertext.h"
 #include "core/glwe/glwe_params.h"
 #include "gpu/common/gpu_common.h"
@@ -211,6 +212,133 @@ void glwe_dft_to_coef_gpu(GLWECiphertext* d_result, const GLWECiphertextDFT* d_g
 
     // GPU_INTT input is Data64* (unsigned NTT domain); output is Data64s* (signed coef domain)
     gpuntt::GPU_INTT((Data64*)d_glwe_ntt->vec, (Data64s*)d_result->vec, intt_tab, mod, cfg_inv, (int)ncols);
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+int64_t* pvda_glwegadget_to_device(const GLWEGadgetCiphertext* glwegad)
+{
+    size_t n_elems = (size_t)glwegad->params->l_tilde
+                   * (size_t)glwegad->params->params_glwe->ciphertext_nb_limbs
+                   * (size_t)glwegad->params->params_glwe->nn;
+    return pvda_gpu_upload((const int64_t*)glwegad->mat, n_elems);
+}
+
+void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadgetCiphertext* glwegad)
+{
+    size_t n     = (size_t)glwegad->params->params_glwe->nn;
+    size_t nrows = (size_t)glwegad->params->l_tilde;
+    size_t ncols = (size_t)glwegad->params->params_glwe->ciphertext_nb_limbs;
+
+    NTTParameterGenerator& gen = NTTParameterGenerator::instance();
+    gen.initialize(n);
+
+    Modulus64 mod     = gen.get_modulus();
+    Root64*   ntt_tab = gen.get_ntt_table(n);
+    int       n_power = (int)std::log2((double)n);
+
+    gpuntt::ntt_configuration<Data64> cfg_fwd = {.n_power        = n_power,
+                                                  .ntt_type       = gpuntt::FORWARD,
+                                                  .ntt_layout     = gpuntt::PerPolynomial,
+                                                  .reduction_poly = gpuntt::X_N_plus,
+                                                  .zero_padding   = false,
+                                                  .mod_inverse    = 0,
+                                                  .stream         = 0};
+
+    const int64_t* d_src;
+    int64_t*       d_tmp = nullptr;
+    if (is_gpu_device_pointer(glwegad->mat)) {
+        d_src = (const int64_t*)glwegad->mat;
+    } else {
+        d_tmp = pvda_glwegadget_to_device(glwegad);
+        d_src = d_tmp;
+    }
+
+    Data64* d_ntt = nullptr;
+    CUDA_CHECK(cudaMalloc((void**)&d_ntt, nrows * ncols * n * sizeof(Data64)));
+    gpuntt::GPU_NTT((Data64s*)d_src, d_ntt, ntt_tab, mod, cfg_fwd, (int)(nrows * ncols));
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    if (d_tmp) pvda_gpu_free(d_tmp);
+
+    gpu_prep->mat = (MatBivDFT*)d_ntt;
+}
+
+void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result,
+                                      size_t n, size_t nrows, size_t ncols)
+{
+    NTTParameterGenerator& gen = NTTParameterGenerator::instance();
+    gen.initialize(n);
+
+    Modulus64  mod      = gen.get_modulus();
+    Root64*    ntt_tab  = gen.get_ntt_table(n);
+    Root64*    intt_tab = gen.get_intt_table(n);
+    Ninverse64 n_inv    = gen.get_n_inv(n);
+    int        n_power  = (int)std::log2((double)n);
+
+    gpuntt::ntt_configuration<Data64> cfg_fwd = {.n_power        = n_power,
+                                                  .ntt_type       = gpuntt::FORWARD,
+                                                  .ntt_layout     = gpuntt::PerPolynomial,
+                                                  .reduction_poly = gpuntt::X_N_plus,
+                                                  .zero_padding   = false,
+                                                  .mod_inverse    = 0,
+                                                  .stream         = 0};
+
+    gpuntt::ntt_configuration<Data64> cfg_inv = {.n_power        = n_power,
+                                                  .ntt_type       = gpuntt::INVERSE,
+                                                  .ntt_layout     = gpuntt::PerPolynomial,
+                                                  .reduction_poly = gpuntt::X_N_plus,
+                                                  .zero_padding   = false,
+                                                  .mod_inverse    = n_inv,
+                                                  .stream         = 0};
+
+    // NTT(a): nrows=l_tilde polynomials
+    VEC_GPU<Data64> d_a_ntt(n * nrows);
+    gpuntt::GPU_NTT((Data64s*)d_a, d_a_ntt.data(), ntt_tab, mod, cfg_fwd, (int)nrows);
+
+    // VMP: d_glwegad_ntt is already in NTT domain (from glwegadget_prepare_gpu)
+    VEC_GPU<Data64> d_c_ntt(n * ncols);
+    int threads = 256;
+    int blocks  = ((int)(n * ncols) + threads - 1) / threads;
+    vmp_accumulate_kernel<<<blocks, threads>>>(d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_glwegad_ntt, mod,
+                                              (int)n, (int)nrows, (int)ncols);
+    CUDA_CHECK(cudaGetLastError());
+
+    // INTT: result in coefficient domain
+    gpuntt::GPU_INTT(d_c_ntt.data(), (Data64s*)d_result, intt_tab, mod, cfg_inv, (int)ncols);
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+void gpu_glwegadget_half_prod_ntt_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result_ntt,
+                                          size_t n, size_t nrows, size_t ncols)
+{
+    NTTParameterGenerator& gen = NTTParameterGenerator::instance();
+    gen.initialize(n);
+
+    Modulus64 mod     = gen.get_modulus();
+    Root64*   ntt_tab = gen.get_ntt_table(n);
+    int       n_power = (int)std::log2((double)n);
+
+    gpuntt::ntt_configuration<Data64> cfg_fwd = {.n_power        = n_power,
+                                                  .ntt_type       = gpuntt::FORWARD,
+                                                  .ntt_layout     = gpuntt::PerPolynomial,
+                                                  .reduction_poly = gpuntt::X_N_plus,
+                                                  .zero_padding   = false,
+                                                  .mod_inverse    = 0,
+                                                  .stream         = 0};
+
+    // NTT(a): nrows=l_tilde polynomials
+    VEC_GPU<Data64> d_a_ntt(n * nrows);
+    gpuntt::GPU_NTT((Data64s*)d_a, d_a_ntt.data(), ntt_tab, mod, cfg_fwd, (int)nrows);
+
+    // VMP: d_glwegad_ntt is already in NTT domain — result stays in NTT domain (no INTT)
+    VEC_GPU<Data64> d_c_ntt(n * ncols);
+    int threads = 256;
+    int blocks  = ((int)(n * ncols) + threads - 1) / threads;
+    vmp_accumulate_kernel<<<blocks, threads>>>(d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_glwegad_ntt, mod,
+                                              (int)n, (int)nrows, (int)ncols);
+    CUDA_CHECK(cudaGetLastError());
+
+    CUDA_CHECK(cudaMemcpy(d_result_ntt, d_c_ntt.data(), n * ncols * sizeof(int64_t), cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaDeviceSynchronize());
 }
 
