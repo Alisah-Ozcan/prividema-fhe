@@ -15,6 +15,10 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/host/ggsw_external_product_gpu.h"
+#endif
+
 GLWEGadgetCiphertext* new_glwegadget(const GLWEGadgetParams* params)
 {
 	GLWEGadgetCiphertext* glwegadget = calloc(sizeof(GLWEGadgetCiphertext), 1);
@@ -74,7 +78,14 @@ cleanup:
 void delete_glwegadget_prep(GLWEGadgetCiphertextPrep* glwegadget_prep_ct)
 {
 	if (!glwegadget_prep_ct) return;
+#ifdef ENABLE_CUDA
+	if (glwegadget_prep_ct->mat && pvda_is_device_pointer(glwegadget_prep_ct->mat))
+		pvda_gpu_free((int64_t*)glwegadget_prep_ct->mat);
+	else
+		free(glwegadget_prep_ct->mat);
+#else
 	free(glwegadget_prep_ct->mat);
+#endif
 	free(glwegadget_prep_ct);
 }
 
@@ -126,6 +137,16 @@ cleanup:
 int glwegadget_prepare(const PvdaBackend* module, GLWEGadgetCiphertextPrep* glwegadget_prep_ct,
                        const GLWEGadgetCiphertext* glwegad_ct)
 {
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwegad_ct->mat))
+	{
+		if (glwegadget_prep_ct->mat && !pvda_is_device_pointer(glwegadget_prep_ct->mat))
+			free(glwegadget_prep_ct->mat);
+		glwegadget_prepare_gpu(glwegadget_prep_ct, glwegad_ct);
+		return 0;
+	}
+#endif
+
 	int status = -1;
 
 	size_t nrows = glwegadget_prep_ct->params->l_tilde;

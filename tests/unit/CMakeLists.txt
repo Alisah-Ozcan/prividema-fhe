@@ -132,4 +132,12 @@ if(ENABLE_CUDA)
       ${PROJECT_SOURCE_DIR}/include/backend
   )
 
+  # test_glwegadget_half_product also has an #ifdef ENABLE_CUDA GPU variant —
+  # add GPU linking to that specific target (already created by BuildUnitTests above).
+  target_link_libraries(test_glwegadget_half_product PRIVATE PVDA_GPU CUDA::cudart)
+  target_compile_definitions(test_glwegadget_half_product PRIVATE ENABLE_CUDA)
+  target_include_directories(test_glwegadget_half_product PRIVATE
+      ${PROJECT_SOURCE_DIR}/include/backend
+  )
+
 endif()
