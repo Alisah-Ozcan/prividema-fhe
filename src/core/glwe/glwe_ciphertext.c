@@ -41,6 +41,14 @@ cleanup:
 void delete_glwe(GLWECiphertext* glwe)
 {
 	if (!glwe) return;
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwe->vec))
+	{
+		pvda_gpu_free((int64_t*)glwe->vec);
+		free(glwe);
+		return;
+	}
+#endif
 	free(glwe->vec);
 	free(glwe);
 }
@@ -76,8 +84,25 @@ cleanup:
 
 void glwe_copy(GLWECiphertext* dst, const GLWECiphertext* src)
 {
-	size_t src_size = glwe_coef_number(src->params) * sizeof(int64_t);
-	size_t dst_size = glwe_coef_number(dst->params) * sizeof(int64_t);
+	size_t src_elems = glwe_coef_number(src->params);
+	size_t dst_elems = glwe_coef_number(dst->params);
+
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(dst->vec) && pvda_is_device_pointer(src->vec))
+	{
+		if (dst_elems <= src_elems)
+			pvda_gpu_copy((int64_t*)dst->vec, (const int64_t*)src->vec, dst_elems);
+		else
+		{
+			pvda_gpu_copy((int64_t*)dst->vec, (const int64_t*)src->vec, src_elems);
+			pvda_gpu_zero((int64_t*)dst->vec + src_elems, dst_elems - src_elems);
+		}
+		return;
+	}
+#endif
+
+	size_t src_size = src_elems * sizeof(int64_t);
+	size_t dst_size = dst_elems * sizeof(int64_t);
 	if (dst_size <= src_size)
 		memcpy(dst->vec, src->vec, dst_size);
 	else

@@ -50,7 +50,7 @@ Test(gpu_ntt_poly_mult, ntt_vs_schoolbook)
 
 	for (int i = 0; i < POLY_SIZE; i++)
 	{
-		cr_assert_eq(C_ntt[i], C_ref[i], "Mismatch at [%d]: GPU-NTT=%lld  Schoolbook=%lld", i,
-		             (long long)C_ntt[i], (long long)C_ref[i]);
+		cr_assert_eq(C_ntt[i], C_ref[i], "Mismatch at [%d]: GPU-NTT=%lld  Schoolbook=%lld", i, (long long)C_ntt[i],
+		             (long long)C_ref[i]);
 	}
 }

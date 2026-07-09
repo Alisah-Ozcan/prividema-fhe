@@ -8,6 +8,10 @@
 #include "glwe_params.h"
 #include "utils.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/host/ggsw_external_product_gpu.h"  // pvda_is_device_pointer / pvda_new_glwe_device
+#endif
+
 int tfhe_cmux_unprepared(const MODULE* module, GLWECiphertext* res, const GLWECiphertext* c0, const GLWECiphertext* c1,
                          const GGSWCiphertext* sel, int normalize_sub)
 {
@@ -38,11 +42,29 @@ cleanup:
 	return -1;
 }
 
+// Allocates an intermediate CMux-tree node. tfhe_cmux_tree's inputs (src) may live in
+// GPU device memory (when the caller wants the whole tree to run on the GPU, through
+// tfhe_cmux's own GPU dispatch) — intermediate nodes must then also be device-resident,
+// since new_glwe always allocates host memory.
+static GLWECiphertext* tfhe_cmux_tree_new_node(const GLWEParams* params, int use_gpu)
+{
+#ifdef ENABLE_CUDA
+	if (use_gpu) return pvda_new_glwe_device(params);
+#endif
+	(void)use_gpu;
+	return new_glwe(params);
+}
+
 int tfhe_cmux_tree(const MODULE* module, GLWECiphertext* res, const GLWECiphertext** src, int inp_cols,
                    const GGSWCiphertextPrep** selectors, int sel_size, int delete_src)
 {
 	GLWEParams* aggregation_params = res->params;
 	int64_t log_inp_cols           = next_pow2_log(inp_cols);
+
+	int use_gpu = 0;
+#ifdef ENABLE_CUDA
+	use_gpu = inp_cols > 0 && pvda_is_device_pointer(src[0]->vec);
+#endif
 
 	GLWECiphertext* glwe_tree[(log_inp_cols + 1)][inp_cols];  //Inefficient, suffices for now
 	memset(glwe_tree, 0, (log_inp_cols + 1) * inp_cols * sizeof(GLWECiphertext*));
@@ -67,7 +89,7 @@ int tfhe_cmux_tree(const MODULE* module, GLWECiphertext* res, const GLWECipherte
 		else
 			for (int c = 0; c < (used_cols + 1) / 2; ++c)
 			{
-				glwe_tree[l + 1][c] = new_glwe(aggregation_params);
+				glwe_tree[l + 1][c] = tfhe_cmux_tree_new_node(aggregation_params, use_gpu);
 				CHECK_ALLOC(glwe_tree[l + 1][c], "GLWE allocation failed in a CMux tree");
 			}
 

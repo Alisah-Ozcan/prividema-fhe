@@ -5,11 +5,12 @@
 #include <stdint.h>
 
 // Forward declarations — avoids pulling in core headers here.
-typedef struct glwe_ciphertext                GLWECiphertext;
-typedef struct glwe_ciphertext_dft            GLWECiphertextDFT;
-typedef struct ggsw_ciphertext                GGSWCiphertext;
-typedef struct ggsw_ciphertext_prepared       GGSWCiphertextPrep;
-typedef struct glwegadget_ciphertext          GLWEGadgetCiphertext;
+typedef struct glwe_ciphertext GLWECiphertext;
+typedef struct glwe_ciphertext_dft GLWECiphertextDFT;
+typedef struct glwe_ct_params GLWEParams;
+typedef struct ggsw_ciphertext GGSWCiphertext;
+typedef struct ggsw_ciphertext_prepared GGSWCiphertextPrep;
+typedef struct glwegadget_ciphertext GLWEGadgetCiphertext;
 typedef struct glwegadget_ciphertext_prepared GLWEGadgetCiphertextPrep;
 
 #ifdef __cplusplus
@@ -36,6 +37,12 @@ int64_t* pvda_gpu_alloc(size_t n_elements);
 // Free a device buffer obtained from pvda_gpu_upload or pvda_gpu_alloc.
 void pvda_gpu_free(int64_t* device_ptr);
 
+// Device-to-device copy of n_elements int64_t (both pointers must be device pointers).
+void pvda_gpu_copy(int64_t* dst, const int64_t* src, size_t n_elements);
+
+// Zero n_elements int64_t of device memory.
+void pvda_gpu_zero(int64_t* dst, size_t n_elements);
+
 // ---------------------------------------------------------------------------
 // Struct-typed transfer helpers (size computed from params automatically)
 // ---------------------------------------------------------------------------
@@ -50,6 +57,11 @@ void pvda_glwe_from_device(GLWECiphertext* result, const int64_t* d_data);
 // Allocate device buffer and upload the coefficient matrix of a GGSWCiphertext.
 // Returned pointer holds  nrows * ncols * nn  int64_t values (row-major).
 int64_t* pvda_ggsw_to_device(const GGSWCiphertext* ggsw);
+
+// Allocate a new GLWECiphertext whose vec lives in (uninitialised) device memory —
+// the device-resident counterpart of new_glwe. Free with delete_glwe, which is
+// itself device-aware (see glwe_ciphertext.c).
+GLWECiphertext* pvda_new_glwe_device(const GLWEParams* params);
 
 // ---------------------------------------------------------------------------
 // GPU external product — all pointer arguments must be CUDA device pointers.
@@ -80,8 +92,8 @@ void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw);
 // d_ggsw_ntt  : [nrows * ncols * n]  — NTT-domain int64_t on device (from ggsw_prepare_gpu)
 // d_result_ntt: [ncols * n]          — NTT-domain output on device
 // ---------------------------------------------------------------------------
-void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_ntt, int64_t* d_result_ntt,
-                                   size_t n, size_t nrows, size_t ncols);
+void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_ntt, int64_t* d_result_ntt, size_t n,
+                                  size_t nrows, size_t ncols);
 
 // ---------------------------------------------------------------------------
 // GPU INTT — convert NTT-domain GLWECiphertextDFT to coefficient-domain GLWECiphertext.
@@ -113,8 +125,8 @@ void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadget
 // d_glwegad_ntt: [nrows * ncols * n]   — NTT-domain gadget matrix on device
 // d_result     : [ncols * n]           — coef-domain output (NTT + VMP + INTT)
 // ---------------------------------------------------------------------------
-void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result,
-                                      size_t n, size_t nrows, size_t ncols);
+void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result, size_t n,
+                                     size_t nrows, size_t ncols);
 
 // ---------------------------------------------------------------------------
 // GPU half-product leaving result in NTT domain (no INTT).
@@ -124,7 +136,7 @@ void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwega
 // d_result_ntt : [ncols * n]           — NTT-domain output (NTT + VMP, no INTT)
 // ---------------------------------------------------------------------------
 void gpu_glwegadget_half_prod_ntt_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result_ntt,
-                                          size_t n, size_t nrows, size_t ncols);
+                                         size_t n, size_t nrows, size_t ncols);
 
 #ifdef __cplusplus
 }

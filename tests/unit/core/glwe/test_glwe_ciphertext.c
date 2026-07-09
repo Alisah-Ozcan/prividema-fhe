@@ -11,6 +11,10 @@
 #include "test_utils.h"
 #include "univariate_polynomial.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/host/ggsw_external_product_gpu.h"  // pvda_glwe_to_device / pvda_glwe_from_device / pvda_gpu_alloc / pvda_gpu_free
+#endif
+
 #define NLIMBSBASE (params_glwe->k * glwe_params_l_a(params_glwe) + glwe_params_l_b(params_glwe))
 //! COMMON PART (begin)
 
@@ -222,6 +226,40 @@ PvdaParamTest(sub_glwe, basic, default_params_fn)
 }
 
 /**
+ * @brief Tests whether normalize_glwe brings every coefficient of a bivGLWE ciphertext
+ * back into the base-2^kappa range [-2^(kappa-1), 2^(kappa-1)).
+ */
+PvdaParamTest(normalize_glwe, basic, default_params_fn)
+{
+	INIT_PVDA_PARAMS_GLWE(param);
+
+	// Variables
+	GLWECiphertext* glwe      = new_glwe(params_glwe);
+	GLWECiphertext* glwe_norm = new_glwe(params_glwe);
+
+	// Draws coefficients wider than kappa bits, so normalization must actually carry
+	uniform_random_vec(params_glwe->nn, glwe->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	                   params_glwe->kappa + 3);
+
+	// Computes normalize(glwe)
+	int ret = normalize_glwe(module, glwe_norm, glwe);
+	cr_assert_eq(ret, 0, "normalize_glwe failed");
+
+	// Asserts every coefficient of glwe_norm lies in [-2^(kappa-1), 2^(kappa-1))
+	int64_t half = (int64_t)1 << (params_glwe->kappa - 1);
+	for (uint64_t t = 0; t < glwe_coef_number(params_glwe); t++)
+		cr_assert(glwe_norm->vec[t] >= -half && glwe_norm->vec[t] < half,
+		          "normalized coefficient at %llu out of range: %lld", (unsigned long long)t,
+		          (long long)glwe_norm->vec[t]);
+
+	// Clean up
+	delete_glwe(glwe);
+	delete_glwe(glwe_norm);
+
+	DELETE_PVDA_PARAMS_GLWE;
+}
+
+/**
  * @brief Tests whether const_mult_glwe multiply a bivGLWE ciphertext by a ZnX polynomial.
  */
 PvdaParamTest(const_mult_glwe, without_normalization, default_params_fn)
@@ -398,3 +436,153 @@ PvdaParamTest(const_mult_glwe_dft, without_normalization, default_params_fn)
 
 	DELETE_PVDA_PARAMS_GLWE;
 }
+
+//! GPU dispatch PART (begin)
+//
+// add_glwe / sub_glwe / normalize_glwe transparently dispatch to the GPU when
+// every GLWECiphertext->vec argument is a CUDA device pointer (checked via
+// pvda_is_device_pointer). These tests upload/download through
+// pvda_glwe_to_device / pvda_glwe_from_device and check the GPU path
+// against the CPU (host-pointer) path of the very same function.
+
+#ifdef ENABLE_CUDA
+
+/**
+ * @brief Tests that add_glwe's GPU dispatch matches its CPU path.
+ */
+PvdaParamTest(add_glwe, gpu_matches_cpu, default_params_fn)
+{
+	INIT_PVDA_PARAMS_GLWE(param);
+
+	GLWECiphertext* glwe_lhs     = new_glwe(params_glwe);
+	GLWECiphertext* glwe_rhs     = new_glwe(params_glwe);
+	GLWECiphertext* sum_expected = new_glwe(params_glwe);
+	GLWECiphertext* sum_from_gpu = new_glwe(params_glwe);
+
+	uniform_random_vec(params_glwe->nn, glwe_lhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	                   params_glwe->kappa - 1);
+	uniform_random_vec(params_glwe->nn, glwe_rhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	                   params_glwe->kappa - 1);
+
+	// CPU reference (host pointers → CPU path)
+	add_glwe(module, sum_expected, glwe_lhs, glwe_rhs);
+
+	// GPU (device pointers → GPU path, same add_glwe entry point)
+	size_t total              = glwe_coef_number(params_glwe);
+	GLWECiphertext gpu_lhs    = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_lhs)};
+	GLWECiphertext gpu_rhs    = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_rhs)};
+	GLWECiphertext gpu_result = {.params = params_glwe, .vec = pvda_gpu_alloc(total)};
+
+	cr_assert_not_null(gpu_lhs.vec, "pvda_glwe_to_device failed");
+	cr_assert_not_null(gpu_rhs.vec, "pvda_glwe_to_device failed");
+	cr_assert_not_null(gpu_result.vec, "pvda_gpu_alloc failed");
+
+	add_glwe(module, &gpu_result, &gpu_lhs, &gpu_rhs);
+	pvda_glwe_from_device(sum_from_gpu, gpu_result.vec);
+
+	for (uint64_t t = 0; t < total; t++) cr_assert(eq(i64, sum_from_gpu->vec[t], sum_expected->vec[t]));
+
+	pvda_gpu_free(gpu_lhs.vec);
+	pvda_gpu_free(gpu_rhs.vec);
+	pvda_gpu_free(gpu_result.vec);
+
+	delete_glwe(glwe_lhs);
+	delete_glwe(glwe_rhs);
+	delete_glwe(sum_expected);
+	delete_glwe(sum_from_gpu);
+
+	DELETE_PVDA_PARAMS_GLWE;
+}
+
+/**
+ * @brief Tests that sub_glwe's GPU dispatch matches its CPU path.
+ */
+PvdaParamTest(sub_glwe, gpu_matches_cpu, default_params_fn)
+{
+	INIT_PVDA_PARAMS_GLWE(param);
+
+	GLWECiphertext* glwe_lhs     = new_glwe(params_glwe);
+	GLWECiphertext* glwe_rhs     = new_glwe(params_glwe);
+	GLWECiphertext* sub_expected = new_glwe(params_glwe);
+	GLWECiphertext* sub_from_gpu = new_glwe(params_glwe);
+
+	uniform_random_vec(params_glwe->nn, glwe_lhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	                   params_glwe->kappa - 1);
+	uniform_random_vec(params_glwe->nn, glwe_rhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	                   params_glwe->kappa - 1);
+
+	// CPU reference (host pointers → CPU path)
+	sub_glwe(module, sub_expected, glwe_lhs, glwe_rhs);
+
+	// GPU (device pointers → GPU path, same sub_glwe entry point)
+	size_t total              = glwe_coef_number(params_glwe);
+	GLWECiphertext gpu_lhs    = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_lhs)};
+	GLWECiphertext gpu_rhs    = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_rhs)};
+	GLWECiphertext gpu_result = {.params = params_glwe, .vec = pvda_gpu_alloc(total)};
+
+	cr_assert_not_null(gpu_lhs.vec, "pvda_glwe_to_device failed");
+	cr_assert_not_null(gpu_rhs.vec, "pvda_glwe_to_device failed");
+	cr_assert_not_null(gpu_result.vec, "pvda_gpu_alloc failed");
+
+	sub_glwe(module, &gpu_result, &gpu_lhs, &gpu_rhs);
+	pvda_glwe_from_device(sub_from_gpu, gpu_result.vec);
+
+	for (uint64_t t = 0; t < total; t++) cr_assert(eq(i64, sub_from_gpu->vec[t], sub_expected->vec[t]));
+
+	pvda_gpu_free(gpu_lhs.vec);
+	pvda_gpu_free(gpu_rhs.vec);
+	pvda_gpu_free(gpu_result.vec);
+
+	delete_glwe(glwe_lhs);
+	delete_glwe(glwe_rhs);
+	delete_glwe(sub_expected);
+	delete_glwe(sub_from_gpu);
+
+	DELETE_PVDA_PARAMS_GLWE;
+}
+
+/**
+ * @brief Tests that normalize_glwe's GPU dispatch matches its CPU path, including
+ * the k > 1, l_a != l_b parameter sets (see default_params_fn).
+ */
+PvdaParamTest(normalize_glwe, gpu_matches_cpu, default_params_fn)
+{
+	INIT_PVDA_PARAMS_GLWE(param);
+
+	GLWECiphertext* glwe          = new_glwe(params_glwe);
+	GLWECiphertext* norm_expected = new_glwe(params_glwe);
+	GLWECiphertext* norm_from_gpu = new_glwe(params_glwe);
+
+	// Draws coefficients wider than kappa bits, so normalization must actually carry
+	uniform_random_vec(params_glwe->nn, glwe->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	                   params_glwe->kappa + 3);
+
+	// CPU reference (host pointers → CPU path)
+	int ret = normalize_glwe(module, norm_expected, glwe);
+	cr_assert_eq(ret, 0, "normalize_glwe (CPU) failed");
+
+	// GPU (device pointers → GPU path, same normalize_glwe entry point)
+	size_t total              = glwe_coef_number(params_glwe);
+	GLWECiphertext gpu_glwe   = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe)};
+	GLWECiphertext gpu_result = {.params = params_glwe, .vec = pvda_gpu_alloc(total)};
+
+	cr_assert_not_null(gpu_glwe.vec, "pvda_glwe_to_device failed");
+	cr_assert_not_null(gpu_result.vec, "pvda_gpu_alloc failed");
+
+	ret = normalize_glwe(module, &gpu_result, &gpu_glwe);
+	cr_assert_eq(ret, 0, "normalize_glwe (GPU) failed");
+	pvda_glwe_from_device(norm_from_gpu, gpu_result.vec);
+
+	for (uint64_t t = 0; t < total; t++) cr_assert(eq(i64, norm_from_gpu->vec[t], norm_expected->vec[t]));
+
+	pvda_gpu_free(gpu_glwe.vec);
+	pvda_gpu_free(gpu_result.vec);
+
+	delete_glwe(glwe);
+	delete_glwe(norm_expected);
+	delete_glwe(norm_from_gpu);
+
+	DELETE_PVDA_PARAMS_GLWE;
+}
+
+#endif  // ENABLE_CUDA

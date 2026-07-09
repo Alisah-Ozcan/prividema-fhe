@@ -26,29 +26,25 @@
 #include <stdio.h>
 #include <time.h>
 
-#define PVDA_TIME_START(label) \
-    struct timespec _ts_start_##label; \
-    clock_gettime(CLOCK_MONOTONIC, &_ts_start_##label)
+#define PVDA_TIME_START(label)         \
+	struct timespec _ts_start_##label; \
+	clock_gettime(CLOCK_MONOTONIC, &_ts_start_##label)
 
-#define PVDA_TIME_END(label, pglwe, pggsw) \
-    do { \
-        struct timespec _ts_end_##label; \
-        clock_gettime(CLOCK_MONOTONIC, &_ts_end_##label); \
-        double _ms_##label = (_ts_end_##label.tv_sec  - _ts_start_##label.tv_sec)  * 1e3 \
-                           + (_ts_end_##label.tv_nsec - _ts_start_##label.tv_nsec) * 1e-6; \
-        fprintf(stderr, \
-                "[TIMING] " #label \
-                " (n=%llu, k=%llu, kappa=%llu, limbs=%llu, limbs_tilde=%llu): %.3f ms\n", \
-                (unsigned long long)(pglwe)->nn, \
-                (unsigned long long)(pglwe)->k, \
-                (unsigned long long)(pglwe)->kappa, \
-                (unsigned long long)(pglwe)->ciphertext_nb_limbs, \
-                (unsigned long long)(pggsw)->ciphertext_nb_limbs_tilde, \
-                _ms_##label); \
-    } while (0)
+#define PVDA_TIME_END(label, pglwe, pggsw)                                                                           \
+	do                                                                                                               \
+	{                                                                                                                \
+		struct timespec _ts_end_##label;                                                                             \
+		clock_gettime(CLOCK_MONOTONIC, &_ts_end_##label);                                                            \
+		double _ms_##label = (_ts_end_##label.tv_sec - _ts_start_##label.tv_sec) * 1e3 +                             \
+		                     (_ts_end_##label.tv_nsec - _ts_start_##label.tv_nsec) * 1e-6;                           \
+		fprintf(stderr, "[TIMING] " #label " (n=%llu, k=%llu, kappa=%llu, limbs=%llu, limbs_tilde=%llu): %.3f ms\n", \
+		        (unsigned long long)(pglwe)->nn, (unsigned long long)(pglwe)->k, (unsigned long long)(pglwe)->kappa, \
+		        (unsigned long long)(pglwe)->ciphertext_nb_limbs,                                                    \
+		        (unsigned long long)(pggsw)->ciphertext_nb_limbs_tilde, _ms_##label);                                \
+	} while (0)
 #else
-#define PVDA_TIME_START(label)              ((void)0)
-#define PVDA_TIME_END(label, pglwe, pggsw)  ((void)0)
+#define PVDA_TIME_START(label)             ((void)0)
+#define PVDA_TIME_END(label, pglwe, pggsw) ((void)0)
 #endif
 
 /** The test is done without error, it is a proof of concept*/
@@ -317,14 +313,14 @@ PvdaParamTest(ggsw_external_product, gpu_without_error, default_params_fn)
 	// Upload ciphertexts, run NTT-based VMP on device, download result.
 	gpu_ntt_initialize(params_glwe->nn);
 	//PVDA_TIME_START(gpu_unprepared_external_product);
-	size_t result_elems              = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
-	GLWECiphertext gpu_glwe_tilde    = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_tilde)};
-	GGSWCiphertext gpu_ggsw          = {.params = params_ggsw, .mat = pvda_ggsw_to_device(ggsw)};
-	GLWECiphertext gpu_result        = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
+	size_t result_elems           = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
+	GLWECiphertext gpu_glwe_tilde = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe_tilde)};
+	GGSWCiphertext gpu_ggsw       = {.params = params_ggsw, .mat = pvda_ggsw_to_device(ggsw)};
+	GLWECiphertext gpu_result     = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
 
 	cr_assert_not_null(gpu_glwe_tilde.vec, "pvda_glwe_to_device failed");
-	cr_assert_not_null(gpu_ggsw.mat,       "pvda_ggsw_to_device failed");
-	cr_assert_not_null(gpu_result.vec,     "pvda_gpu_alloc for result failed");
+	cr_assert_not_null(gpu_ggsw.mat, "pvda_ggsw_to_device failed");
+	cr_assert_not_null(gpu_result.vec, "pvda_gpu_alloc for result failed");
 
 	PVDA_TIME_START(gpu_unprepared_external_product);
 	ggsw_unprepared_external_product(module, &gpu_result, &gpu_glwe_tilde, &gpu_ggsw);
@@ -378,8 +374,8 @@ PvdaParamTest(ggsw_external_product, gpu_to_dft_without_error, default_params_fn
 
 	params_glwe->fast_uniform_nb_bits = 0;
 	sigma                             = 0;
-	double err_length          = glwe_bivariate_epsilon(params_glwe) + 3 * sigma + 3 * DBL_EPSILON;
-	double critical_err_length = glwe_bivariate_epsilon(params_glwe) + 5 * sigma + 5 * DBL_EPSILON;
+	double err_length                 = glwe_bivariate_epsilon(params_glwe) + 3 * sigma + 3 * DBL_EPSILON;
+	double critical_err_length        = glwe_bivariate_epsilon(params_glwe) + 5 * sigma + 5 * DBL_EPSILON;
 
 	GLWESecretKey* sk_ggsw              = alloc_glwe_secret_key(params_glwe);
 	GLWESecretKeyPrepared* sk_glwe_prep = alloc_glwe_secret_key_prepared(params_glwe);
@@ -417,12 +413,12 @@ PvdaParamTest(ggsw_external_product, gpu_to_dft_without_error, default_params_fn
 	// NTT-domain result buffer (int64_t on device, cast as VecBivDFT* for the struct)
 	GLWECiphertextDFT gpu_result_dft = {.params = params_glwe, .vec = (VecBivDFT*)pvda_gpu_alloc(result_elems)};
 	// Coefficient-domain output buffer (filled by glwe_dft_to_coef)
-	GLWECiphertext gpu_result_coef   = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
+	GLWECiphertext gpu_result_coef = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
 
-	cr_assert_not_null(gpu_glwe_tilde.vec,  "pvda_glwe_to_device failed");
-	cr_assert_not_null(gpu_ggsw.mat,        "pvda_ggsw_to_device failed");
-	cr_assert_not_null(gpu_ggsw_prep.mat,   "ggsw_prepare failed");
-	cr_assert_not_null(gpu_result_dft.vec,  "pvda_gpu_alloc for NTT result failed");
+	cr_assert_not_null(gpu_glwe_tilde.vec, "pvda_glwe_to_device failed");
+	cr_assert_not_null(gpu_ggsw.mat, "pvda_ggsw_to_device failed");
+	cr_assert_not_null(gpu_ggsw_prep.mat, "ggsw_prepare failed");
+	cr_assert_not_null(gpu_result_dft.vec, "pvda_gpu_alloc for NTT result failed");
 	cr_assert_not_null(gpu_result_coef.vec, "pvda_gpu_alloc for coef result failed");
 
 	PVDA_TIME_START(gpu_external_product_to_dft);
@@ -477,8 +473,8 @@ PvdaParamTest(ggsw_external_product, gpu_prepared_without_error, default_params_
 
 	params_glwe->fast_uniform_nb_bits = 0;
 	sigma                             = 0;
-	double err_length          = glwe_bivariate_epsilon(params_glwe) + 3 * sigma + 3 * DBL_EPSILON;
-	double critical_err_length = glwe_bivariate_epsilon(params_glwe) + 5 * sigma + 5 * DBL_EPSILON;
+	double err_length                 = glwe_bivariate_epsilon(params_glwe) + 3 * sigma + 3 * DBL_EPSILON;
+	double critical_err_length        = glwe_bivariate_epsilon(params_glwe) + 5 * sigma + 5 * DBL_EPSILON;
 
 	GLWESecretKey* sk_ggsw              = alloc_glwe_secret_key(params_glwe);
 	GLWESecretKeyPrepared* sk_glwe_prep = alloc_glwe_secret_key_prepared(params_glwe);
@@ -515,9 +511,9 @@ PvdaParamTest(ggsw_external_product, gpu_prepared_without_error, default_params_
 	GLWECiphertext gpu_result = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
 
 	cr_assert_not_null(gpu_glwe_tilde.vec, "pvda_glwe_to_device failed");
-	cr_assert_not_null(gpu_ggsw.mat,       "pvda_ggsw_to_device failed");
-	cr_assert_not_null(gpu_ggsw_prep.mat,  "ggsw_prepare failed");
-	cr_assert_not_null(gpu_result.vec,     "pvda_gpu_alloc for result failed");
+	cr_assert_not_null(gpu_ggsw.mat, "pvda_ggsw_to_device failed");
+	cr_assert_not_null(gpu_ggsw_prep.mat, "ggsw_prepare failed");
+	cr_assert_not_null(gpu_result.vec, "pvda_gpu_alloc for result failed");
 
 	PVDA_TIME_START(gpu_external_product);
 	ggsw_external_product(module, &gpu_result, &gpu_glwe_tilde, &gpu_ggsw_prep);
@@ -525,7 +521,7 @@ PvdaParamTest(ggsw_external_product, gpu_prepared_without_error, default_params_
 
 	pvda_glwe_from_device(ext_prod_observed, gpu_result.vec);
 	//PVDA_TIME_END(gpu_external_product, params_glwe, params_ggsw);
-	
+
 	normalize_glwe(module, ext_prod_observed, ext_prod_observed);
 	glwe_secret_decrypt(module, phase_observed, sk_glwe_prep, ext_prod_observed);
 	biv_to_univ_rnx(params_glwe, um_observed_univ_rnx, phase_observed);

@@ -113,8 +113,8 @@ int ggsw_unprepared_external_product(const MODULE* module,
 #ifdef ENABLE_CUDA
 	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw->mat))
 	{
-		gpu_ggsw_external_product_device((const int64_t*)glwe->vec, (const int64_t*)ggsw->mat,
-		                                 (int64_t*)result->vec, nn, nrows, ncols_in);
+		gpu_ggsw_external_product_device((const int64_t*)glwe->vec, (const int64_t*)ggsw->mat, (int64_t*)result->vec,
+		                                 nn, nrows, ncols_in);
 		return 0;
 	}
 #endif
@@ -189,11 +189,11 @@ int ggsw_external_product(const MODULE* module, GLWECiphertext* result, const GL
 	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw_prepared->mat))
 	{
 		// NTT-domain VMP then INTT: mirrors ggsw_external_product_to_dft + glwe_dft_to_coef on GPU
-		int64_t*          d_tmp_ntt   = pvda_gpu_alloc((size_t)ncols_in * (size_t)nn);
+		int64_t* d_tmp_ntt            = pvda_gpu_alloc((size_t)ncols_in * (size_t)nn);
 		GLWECiphertextDFT tmp_ntt_dft = {.params = result->params, .vec = (VecBivDFT*)d_tmp_ntt};
 
-		gpu_ggsw_ext_prod_ntt_device((const int64_t*)glwe->vec, (const int64_t*)ggsw_prepared->mat,
-		                             d_tmp_ntt, nn, nrows, ncols_in);
+		gpu_ggsw_ext_prod_ntt_device((const int64_t*)glwe->vec, (const int64_t*)ggsw_prepared->mat, d_tmp_ntt, nn,
+		                             nrows, ncols_in);
 		glwe_dft_to_coef(module, result, &tmp_ntt_dft);
 
 		pvda_gpu_free(d_tmp_ntt);

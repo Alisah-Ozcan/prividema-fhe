@@ -126,13 +126,11 @@ Test(gpu_nttparameters, device_pointer_detection)
 {
 	static int64_t host_buf[64];
 
-	cr_assert_eq(pvda_is_device_pointer(host_buf), 0,
-	             "Stack buffer must be identified as host pointer");
+	cr_assert_eq(pvda_is_device_pointer(host_buf), 0, "Stack buffer must be identified as host pointer");
 
 	int64_t* d_buf = pvda_gpu_alloc(64);
 	cr_assert_not_null(d_buf, "GPU alloc failed");
-	cr_assert_eq(pvda_is_device_pointer(d_buf), 1,
-	             "cudaMalloc buffer must be identified as device pointer");
+	cr_assert_eq(pvda_is_device_pointer(d_buf), 1, "cudaMalloc buffer must be identified as device pointer");
 
 	pvda_gpu_free(d_buf);
 }

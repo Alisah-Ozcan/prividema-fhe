@@ -29,29 +29,25 @@
 #include <stdio.h>
 #include <time.h>
 
-#define PVDA_TIME_START(label) \
-    struct timespec _ts_start_##label; \
-    clock_gettime(CLOCK_MONOTONIC, &_ts_start_##label)
+#define PVDA_TIME_START(label)         \
+	struct timespec _ts_start_##label; \
+	clock_gettime(CLOCK_MONOTONIC, &_ts_start_##label)
 
-#define PVDA_TIME_END(label, pglwe, pggsw) \
-    do { \
-        struct timespec _ts_end_##label; \
-        clock_gettime(CLOCK_MONOTONIC, &_ts_end_##label); \
-        double _ms_##label = (_ts_end_##label.tv_sec  - _ts_start_##label.tv_sec)  * 1e3 \
-                           + (_ts_end_##label.tv_nsec - _ts_start_##label.tv_nsec) * 1e-6; \
-        fprintf(stderr, \
-                "[TIMING] " #label \
-                " (n=%llu, k=%llu, kappa=%llu, limbs=%llu, limbs_tilde=%llu): %.3f ms\n", \
-                (unsigned long long)(pglwe)->nn, \
-                (unsigned long long)(pglwe)->k, \
-                (unsigned long long)(pglwe)->kappa, \
-                (unsigned long long)(pglwe)->ciphertext_nb_limbs, \
-                (unsigned long long)(pggsw)->ciphertext_nb_limbs_tilde, \
-                _ms_##label); \
-    } while (0)
+#define PVDA_TIME_END(label, pglwe, pggsw)                                                                           \
+	do                                                                                                               \
+	{                                                                                                                \
+		struct timespec _ts_end_##label;                                                                             \
+		clock_gettime(CLOCK_MONOTONIC, &_ts_end_##label);                                                            \
+		double _ms_##label = (_ts_end_##label.tv_sec - _ts_start_##label.tv_sec) * 1e3 +                             \
+		                     (_ts_end_##label.tv_nsec - _ts_start_##label.tv_nsec) * 1e-6;                           \
+		fprintf(stderr, "[TIMING] " #label " (n=%llu, k=%llu, kappa=%llu, limbs=%llu, limbs_tilde=%llu): %.3f ms\n", \
+		        (unsigned long long)(pglwe)->nn, (unsigned long long)(pglwe)->k, (unsigned long long)(pglwe)->kappa, \
+		        (unsigned long long)(pglwe)->ciphertext_nb_limbs,                                                    \
+		        (unsigned long long)(pggsw)->ciphertext_nb_limbs_tilde, _ms_##label);                                \
+	} while (0)
 #else
-#define PVDA_TIME_START(label)              ((void)0)
-#define PVDA_TIME_END(label, pglwe, pggsw)  ((void)0)
+#define PVDA_TIME_START(label)             ((void)0)
+#define PVDA_TIME_END(label, pglwe, pggsw) ((void)0)
 #endif
 
 PvdaParamTest(glwegadget_half_product, without_error, default_params_fn)
@@ -343,17 +339,17 @@ PvdaParamTest(glwegadget_half_product, gpu_without_error, default_params_fn)
 	double critical_err_length =
 	    params_glwe->nn * (3 * DBL_EPSILON + biv_epsilon) + 2 * glwe_params_l_a(params_glwe) * biv_epsilon;
 
-	GLWESecretKey* sk                    = alloc_glwe_secret_key(params_glwe);
-	GLWESecretKeyPrepared* sk_prep       = alloc_glwe_secret_key_prepared(params_glwe);
-	GLWECiphertext* glwe                 = new_glwe(params_glwe);
-	GLWEGadgetCiphertext* glwegad        = new_glwegadget(params_glwegadget);
-	PolyUniv* u_univ                     = new_univ(params_glwe);
-	PolyUnivTnX* m_univ_tnx              = new_univ_tnx(params_glwe);
-	PolyUnivRnX* um_expected_rnx         = new_univ_rnx(params_glwe);
-	PolyUnivTnX* um_expected_tnx         = new_univ_tnx(params_glwe);
-	PolyBiv* um_observed                 = new_biv(params_glwe);
-	PolyUnivRnX* um_observed_rnx         = new_univ_rnx(params_glwe);
-	PolyBiv* m                           = new_biv(params_glwe);
+	GLWESecretKey* sk              = alloc_glwe_secret_key(params_glwe);
+	GLWESecretKeyPrepared* sk_prep = alloc_glwe_secret_key_prepared(params_glwe);
+	GLWECiphertext* glwe           = new_glwe(params_glwe);
+	GLWEGadgetCiphertext* glwegad  = new_glwegadget(params_glwegadget);
+	PolyUniv* u_univ               = new_univ(params_glwe);
+	PolyUnivTnX* m_univ_tnx        = new_univ_tnx(params_glwe);
+	PolyUnivRnX* um_expected_rnx   = new_univ_rnx(params_glwe);
+	PolyUnivTnX* um_expected_tnx   = new_univ_tnx(params_glwe);
+	PolyBiv* um_observed           = new_biv(params_glwe);
+	PolyUnivRnX* um_observed_rnx   = new_univ_rnx(params_glwe);
+	PolyBiv* m                     = new_biv(params_glwe);
 
 	uniform_glwe_secret_key(module, sk, 3);
 	glwe_sk_prepare(module, sk_prep, sk);
@@ -378,15 +374,15 @@ PvdaParamTest(glwegadget_half_product, gpu_without_error, default_params_fn)
 	gpu_ntt_initialize(params_glwe->nn);
 	size_t result_elems = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
 
-	GLWEGadgetCiphertext      gpu_glwegad      = {.params = params_glwegadget,
-	                                               .mat    = (MatBiv*)pvda_glwegadget_to_device(glwegad)};
-	GLWEGadgetCiphertextPrep  gpu_glwegad_prep = {.params = params_glwegadget, .mat = NULL};
+	GLWEGadgetCiphertext gpu_glwegad          = {.params = params_glwegadget,
+	                                             .mat    = (MatBiv*)pvda_glwegadget_to_device(glwegad)};
+	GLWEGadgetCiphertextPrep gpu_glwegad_prep = {.params = params_glwegadget, .mat = NULL};
 	glwegadget_prepare(module, &gpu_glwegad_prep, &gpu_glwegad);
 	GLWECiphertext gpu_result = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
 
-	cr_assert_not_null(gpu_glwegad.mat,      "pvda_glwegadget_to_device failed");
+	cr_assert_not_null(gpu_glwegad.mat, "pvda_glwegadget_to_device failed");
 	cr_assert_not_null(gpu_glwegad_prep.mat, "glwegadget_prepare failed");
-	cr_assert_not_null(gpu_result.vec,       "pvda_gpu_alloc for result failed");
+	cr_assert_not_null(gpu_result.vec, "pvda_gpu_alloc for result failed");
 
 	PVDA_TIME_START(gpu_half_prod);
 	glwegadget_half_prod(module, &gpu_result, &gpu_glwegad_prep, m);
@@ -431,17 +427,17 @@ PvdaParamTest(glwegadget_half_product_dft_to_dft, gpu_without_error, default_par
 	double critical_err_length =
 	    params_glwe->nn * (3 * DBL_EPSILON + biv_epsilon) + 2 * glwe_params_l_a(params_glwe) * biv_epsilon;
 
-	GLWESecretKey* sk                    = alloc_glwe_secret_key(params_glwe);
-	GLWESecretKeyPrepared* sk_prep       = alloc_glwe_secret_key_prepared(params_glwe);
-	GLWECiphertext* glwe                 = new_glwe(params_glwe);
-	GLWEGadgetCiphertext* glwegad        = new_glwegadget(params_glwegadget);
-	PolyUniv* u_univ                     = new_univ(params_glwe);
-	PolyUnivTnX* m_univ_tnx              = new_univ_tnx(params_glwe);
-	PolyUnivRnX* um_expected_rnx         = new_univ_rnx(params_glwe);
-	PolyUnivTnX* um_expected_tnx         = new_univ_tnx(params_glwe);
-	PolyBiv* um_observed                 = new_biv(params_glwe);
-	PolyUnivRnX* um_observed_rnx         = new_univ_rnx(params_glwe);
-	PolyBiv* m                           = new_biv(params_glwe);
+	GLWESecretKey* sk              = alloc_glwe_secret_key(params_glwe);
+	GLWESecretKeyPrepared* sk_prep = alloc_glwe_secret_key_prepared(params_glwe);
+	GLWECiphertext* glwe           = new_glwe(params_glwe);
+	GLWEGadgetCiphertext* glwegad  = new_glwegadget(params_glwegadget);
+	PolyUniv* u_univ               = new_univ(params_glwe);
+	PolyUnivTnX* m_univ_tnx        = new_univ_tnx(params_glwe);
+	PolyUnivRnX* um_expected_rnx   = new_univ_rnx(params_glwe);
+	PolyUnivTnX* um_expected_tnx   = new_univ_tnx(params_glwe);
+	PolyBiv* um_observed           = new_biv(params_glwe);
+	PolyUnivRnX* um_observed_rnx   = new_univ_rnx(params_glwe);
+	PolyBiv* m                     = new_biv(params_glwe);
 
 	uniform_glwe_secret_key(module, sk, 3);
 	glwe_sk_prepare(module, sk_prep, sk);
@@ -468,27 +464,27 @@ PvdaParamTest(glwegadget_half_product_dft_to_dft, gpu_without_error, default_par
 	size_t nn           = (size_t)params_glwe->nn;
 	size_t result_elems = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
 
-	GLWEGadgetCiphertext      gpu_glwegad      = {.params = params_glwegadget,
-	                                               .mat    = (MatBiv*)pvda_glwegadget_to_device(glwegad)};
-	GLWEGadgetCiphertextPrep  gpu_glwegad_prep = {.params = params_glwegadget, .mat = NULL};
+	GLWEGadgetCiphertext gpu_glwegad          = {.params = params_glwegadget,
+	                                             .mat    = (MatBiv*)pvda_glwegadget_to_device(glwegad)};
+	GLWEGadgetCiphertextPrep gpu_glwegad_prep = {.params = params_glwegadget, .mat = NULL};
 	glwegadget_prepare(module, &gpu_glwegad_prep, &gpu_glwegad);
 
 	// Upload first l_tilde coef-domain limb polynomials of m (treated as NTT input by GPU bypass)
 	int64_t* d_m_coef = pvda_gpu_upload(m->ptr, l_tilde * nn);
 
-	GLWECiphertextDFT gpu_result_dft  = {.params = params_glwe, .vec = (VecBivDFT*)pvda_gpu_alloc(result_elems)};
-	GLWECiphertext    gpu_result_coef = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
+	GLWECiphertextDFT gpu_result_dft = {.params = params_glwe, .vec = (VecBivDFT*)pvda_gpu_alloc(result_elems)};
+	GLWECiphertext gpu_result_coef   = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
 
-	cr_assert_not_null(gpu_glwegad.mat,      "pvda_glwegadget_to_device failed");
+	cr_assert_not_null(gpu_glwegad.mat, "pvda_glwegadget_to_device failed");
 	cr_assert_not_null(gpu_glwegad_prep.mat, "glwegadget_prepare failed");
-	cr_assert_not_null(d_m_coef,             "pvda_gpu_upload for m failed");
-	cr_assert_not_null(gpu_result_dft.vec,   "pvda_gpu_alloc for NTT result failed");
-	cr_assert_not_null(gpu_result_coef.vec,  "pvda_gpu_alloc for coef result failed");
+	cr_assert_not_null(d_m_coef, "pvda_gpu_upload for m failed");
+	cr_assert_not_null(gpu_result_dft.vec, "pvda_gpu_alloc for NTT result failed");
+	cr_assert_not_null(gpu_result_coef.vec, "pvda_gpu_alloc for coef result failed");
 
 	PVDA_TIME_START(gpu_half_prod_dft_to_dft);
 	glwegadget_half_prod_dft_to_dft(module, &gpu_result_dft, &gpu_glwegad_prep, (PolyBivDFT*)d_m_coef);
 	PVDA_TIME_END(gpu_half_prod_dft_to_dft, params_glwe, params_ggsw);
-	
+
 	glwe_dft_to_coef(module, &gpu_result_coef, &gpu_result_dft);
 	pvda_glwe_from_device(glwe, gpu_result_coef.vec);
 	normalize_glwe(module, glwe, glwe);
@@ -531,17 +527,17 @@ PvdaParamTest(glwegadget_half_product_prepared_to_dft, gpu_without_error, defaul
 	double critical_err_length =
 	    params_glwe->nn * (3 * DBL_EPSILON + biv_epsilon) + 2 * glwe_params_l_a(params_glwe) * biv_epsilon;
 
-	GLWESecretKey* sk                    = alloc_glwe_secret_key(params_glwe);
-	GLWESecretKeyPrepared* sk_prep       = alloc_glwe_secret_key_prepared(params_glwe);
-	GLWECiphertext* glwe                 = new_glwe(params_glwe);
-	GLWEGadgetCiphertext* glwegad        = new_glwegadget(params_glwegadget);
-	PolyUniv* u_univ                     = new_univ(params_glwe);
-	PolyUnivTnX* m_univ_tnx              = new_univ_tnx(params_glwe);
-	PolyUnivRnX* um_expected_rnx         = new_univ_rnx(params_glwe);
-	PolyUnivTnX* um_expected_tnx         = new_univ_tnx(params_glwe);
-	PolyBiv* um_observed                 = new_biv(params_glwe);
-	PolyUnivRnX* um_observed_rnx         = new_univ_rnx(params_glwe);
-	PolyBiv* m                           = new_biv(params_glwe);
+	GLWESecretKey* sk              = alloc_glwe_secret_key(params_glwe);
+	GLWESecretKeyPrepared* sk_prep = alloc_glwe_secret_key_prepared(params_glwe);
+	GLWECiphertext* glwe           = new_glwe(params_glwe);
+	GLWEGadgetCiphertext* glwegad  = new_glwegadget(params_glwegadget);
+	PolyUniv* u_univ               = new_univ(params_glwe);
+	PolyUnivTnX* m_univ_tnx        = new_univ_tnx(params_glwe);
+	PolyUnivRnX* um_expected_rnx   = new_univ_rnx(params_glwe);
+	PolyUnivTnX* um_expected_tnx   = new_univ_tnx(params_glwe);
+	PolyBiv* um_observed           = new_biv(params_glwe);
+	PolyUnivRnX* um_observed_rnx   = new_univ_rnx(params_glwe);
+	PolyBiv* m                     = new_biv(params_glwe);
 
 	uniform_glwe_secret_key(module, sk, 3);
 	glwe_sk_prepare(module, sk_prep, sk);
@@ -568,22 +564,22 @@ PvdaParamTest(glwegadget_half_product_prepared_to_dft, gpu_without_error, defaul
 	size_t nn           = (size_t)params_glwe->nn;
 	size_t result_elems = (size_t)(glwe_params_n_limbs(params_glwe) * params_glwe->nn);
 
-	GLWEGadgetCiphertext      gpu_glwegad      = {.params = params_glwegadget,
-	                                               .mat    = (MatBiv*)pvda_glwegadget_to_device(glwegad)};
-	GLWEGadgetCiphertextPrep  gpu_glwegad_prep = {.params = params_glwegadget, .mat = NULL};
+	GLWEGadgetCiphertext gpu_glwegad          = {.params = params_glwegadget,
+	                                             .mat    = (MatBiv*)pvda_glwegadget_to_device(glwegad)};
+	GLWEGadgetCiphertextPrep gpu_glwegad_prep = {.params = params_glwegadget, .mat = NULL};
 	glwegadget_prepare(module, &gpu_glwegad_prep, &gpu_glwegad);
 
 	// Upload first l_tilde coef-domain limb polynomials of m (treated as NTT input by GPU bypass)
 	int64_t* d_m_coef = pvda_gpu_upload(m->ptr, l_tilde * nn);
 
-	GLWECiphertextDFT gpu_result_dft  = {.params = params_glwe, .vec = (VecBivDFT*)pvda_gpu_alloc(result_elems)};
-	GLWECiphertext    gpu_result_coef = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
+	GLWECiphertextDFT gpu_result_dft = {.params = params_glwe, .vec = (VecBivDFT*)pvda_gpu_alloc(result_elems)};
+	GLWECiphertext gpu_result_coef   = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
 
-	cr_assert_not_null(gpu_glwegad.mat,      "pvda_glwegadget_to_device failed");
+	cr_assert_not_null(gpu_glwegad.mat, "pvda_glwegadget_to_device failed");
 	cr_assert_not_null(gpu_glwegad_prep.mat, "glwegadget_prepare failed");
-	cr_assert_not_null(d_m_coef,             "pvda_gpu_upload for m failed");
-	cr_assert_not_null(gpu_result_dft.vec,   "pvda_gpu_alloc for NTT result failed");
-	cr_assert_not_null(gpu_result_coef.vec,  "pvda_gpu_alloc for coef result failed");
+	cr_assert_not_null(d_m_coef, "pvda_gpu_upload for m failed");
+	cr_assert_not_null(gpu_result_dft.vec, "pvda_gpu_alloc for NTT result failed");
+	cr_assert_not_null(gpu_result_coef.vec, "pvda_gpu_alloc for coef result failed");
 
 	PVDA_TIME_START(gpu_half_prod_prepared_to_dft);
 	glwegadget_half_prod_prepared_to_dft(module, &gpu_result_dft, &gpu_glwegad_prep, (PolyBivPrep*)d_m_coef);

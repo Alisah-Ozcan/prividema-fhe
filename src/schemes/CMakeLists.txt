@@ -16,3 +16,11 @@ target_include_directories(PVDA_SCHEMES
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include/schemes   # Public headers for consumers
 )
+
+if(ENABLE_CUDA)
+    target_link_libraries(PVDA_SCHEMES PRIVATE PVDA_GPU)
+    target_include_directories(PVDA_SCHEMES PRIVATE
+        ${PROJECT_SOURCE_DIR}/include/backend
+    )
+    target_compile_definitions(PVDA_SCHEMES PRIVATE ENABLE_CUDA)
+endif()

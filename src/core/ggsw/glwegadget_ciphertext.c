@@ -138,8 +138,7 @@ int glwegadget_prepare(const MODULE* module, GLWEGadgetCiphertextPrep* glwegadge
 #ifdef ENABLE_CUDA
 	if (pvda_is_device_pointer(glwegad_ct->mat))
 	{
-		if (glwegadget_prep_ct->mat && !pvda_is_device_pointer(glwegadget_prep_ct->mat))
-			free(glwegadget_prep_ct->mat);
+		if (glwegadget_prep_ct->mat && !pvda_is_device_pointer(glwegadget_prep_ct->mat)) free(glwegadget_prep_ct->mat);
 		glwegadget_prepare_gpu(glwegadget_prep_ct, glwegad_ct);
 		return 0;
 	}

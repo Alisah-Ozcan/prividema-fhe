@@ -12,6 +12,12 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/host/ggsw_external_product_gpu.h"  // pvda_is_device_pointer
+#include "gpu/host/normalize_host.h"
+#include "gpu/host/vec_znx_arith_host.h"
+#endif
+
 int normalize_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphertext* glwe)
 {
 	int status = -1;
@@ -19,6 +25,20 @@ int normalize_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphe
 	// bivGLWE parameters
 	uint64_t k     = result->params->k;
 	uint64_t kappa = result->params->kappa;
+
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(result->vec))
+	{
+		for (uint64_t j = 0; j <= k; j++)
+		{
+			PolyBiv aj_biv  = glwe_extract_poly_view(glwe, j);
+			PolyBiv res_biv = glwe_extract_poly_view(result, j);
+			gpu_normalize_base2k_device((const int64_t*)aj_biv.ptr, (int64_t*)res_biv.ptr, aj_biv.nn, aj_biv.l,
+			                            aj_biv.stride, (uint32_t)kappa);
+		}
+		return 0;
+	}
+#endif
 
 	for (uint64_t j = 0; j <= k; j++)
 	{
@@ -37,6 +57,17 @@ cleanup:
 void add_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphertext* glwe_lhs,
               const GLWECiphertext* glwe_rhs)
 {
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwe_lhs->vec) && pvda_is_device_pointer(glwe_rhs->vec) &&
+	    pvda_is_device_pointer(result->vec))
+	{
+		size_t total = glwe_coef_number(result->params);
+		gpu_vec_znx_add_device((const int64_t*)glwe_lhs->vec, (const int64_t*)glwe_rhs->vec, (int64_t*)result->vec,
+		                       total);
+		return;
+	}
+#endif
+
 	PolyBiv lhs_flattened = glwe_flattened_biv(glwe_lhs);
 	PolyBiv rhs_flattened = glwe_flattened_biv(glwe_rhs);
 	PolyBiv res_flattened = glwe_flattened_biv(result);
@@ -46,6 +77,17 @@ void add_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphertext
 void sub_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphertext* glwe_lhs,
               const GLWECiphertext* glwe_rhs)
 {
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwe_lhs->vec) && pvda_is_device_pointer(glwe_rhs->vec) &&
+	    pvda_is_device_pointer(result->vec))
+	{
+		size_t total = glwe_coef_number(result->params);
+		gpu_vec_znx_sub_device((const int64_t*)glwe_lhs->vec, (const int64_t*)glwe_rhs->vec, (int64_t*)result->vec,
+		                       total);
+		return;
+	}
+#endif
+
 	PolyBiv lhs_flattened = glwe_flattened_biv(glwe_lhs);
 	PolyBiv rhs_flattened = glwe_flattened_biv(glwe_rhs);
 	PolyBiv res_flattened = glwe_flattened_biv(result);
