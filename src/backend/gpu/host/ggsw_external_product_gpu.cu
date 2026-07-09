@@ -82,7 +82,7 @@ GLWECiphertext* pvda_new_glwe_device(const GLWEParams* params)
 }
 
 void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_ggsw, int64_t* d_result, size_t n,
-                                      size_t nrows, size_t ncols)
+                                      size_t nrows, size_t ncols, size_t a_limbs)
 {
 	NTTParameterGenerator& gen = NTTParameterGenerator::instance();
 	gen.initialize(n);
@@ -110,13 +110,13 @@ void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_gg
 	                                             .mod_inverse    = n_inv,
 	                                             .stream         = 0};
 
-	// NTT(GLWE): nrows polynomials expected by the VMP, but d_glwe only holds `ncols`
-	// valid polynomials (the GLWE's own limb count). When the GGSW gadget depth
-	// (nrows, i.e. ciphertext_nb_limbs_tilde) exceeds it, zero-pad the missing rows
-	// instead of reading past the buffer (mirrors spqlios' implicit zero-padding on
-	// the CPU path — see glwe_params.h on ciphertext_nb_limbs vs ciphertext_nb_limbs_tilde).
+	// NTT(GLWE): nrows polynomials expected by the VMP, but d_glwe only holds `a_limbs`
+	// valid polynomials (the GLWE's own limb count, which may differ from both nrows and
+	// ncols — e.g. when the GGSW selector's associated GLWE params differ from the
+	// ciphertext being multiplied). Zero-pad the missing rows instead of reading past the
+	// buffer (mirrors spqlios' implicit zero-padding on the CPU path).
 	VEC_GPU<Data64> d_a_ntt(n * nrows);
-	size_t valid_rows = nrows < ncols ? nrows : ncols;
+	size_t valid_rows = nrows < a_limbs ? nrows : a_limbs;
 	if (valid_rows < nrows)
 		CUDA_CHECK(cudaMemset(d_a_ntt.data() + valid_rows * n, 0, (nrows - valid_rows) * n * sizeof(Data64)));
 	gpuntt::GPU_NTT((Data64s*)d_glwe, d_a_ntt.data(), ntt_tab, mod, cfg_fwd, (int)valid_rows);
@@ -184,7 +184,7 @@ void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw)
 }
 
 void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_ntt, int64_t* d_result_ntt, size_t n,
-                                  size_t nrows, size_t ncols)
+                                  size_t nrows, size_t ncols, size_t a_limbs)
 {
 	NTTParameterGenerator& gen = NTTParameterGenerator::instance();
 	gen.initialize(n);
@@ -201,11 +201,11 @@ void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_n
 	                                             .mod_inverse    = 0,
 	                                             .stream         = 0};
 
-	// NTT(GLWE): nrows polynomials expected by the VMP, but d_glwe only holds `ncols`
+	// NTT(GLWE): nrows polynomials expected by the VMP, but d_glwe only holds `a_limbs`
 	// valid polynomials (the GLWE's own limb count). Zero-pad the missing rows instead
-	// of reading past the buffer when nrows > ncols — see gpu_ggsw_external_product_device.
+	// of reading past the buffer when nrows > a_limbs — see gpu_ggsw_external_product_device.
 	VEC_GPU<Data64> d_a_ntt(n * nrows);
-	size_t valid_rows = nrows < ncols ? nrows : ncols;
+	size_t valid_rows = nrows < a_limbs ? nrows : a_limbs;
 	if (valid_rows < nrows)
 		CUDA_CHECK(cudaMemset(d_a_ntt.data() + valid_rows * n, 0, (nrows - valid_rows) * n * sizeof(Data64)));
 	gpuntt::GPU_NTT((Data64s*)d_glwe, d_a_ntt.data(), ntt_tab, mod, cfg_fwd, (int)valid_rows);

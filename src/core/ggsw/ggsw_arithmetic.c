@@ -113,8 +113,12 @@ int ggsw_unprepared_external_product(const MODULE* module,
 #ifdef ENABLE_CUDA
 	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw->mat))
 	{
+		// glwe's own limb count — may be smaller than nrows (e.g. the GGSW selector's
+		// associated GLWE params differ from the ciphertext being multiplied); the GPU
+		// path zero-pads the missing rows rather than reading past glwe->vec.
+		uint64_t a_limbs = glwe_params_n_limbs(glwe->params);
 		gpu_ggsw_external_product_device((const int64_t*)glwe->vec, (const int64_t*)ggsw->mat, (int64_t*)result->vec,
-		                                 nn, nrows, ncols_in);
+		                                 nn, nrows, ncols_in, a_limbs);
 		return 0;
 	}
 #endif
@@ -159,9 +163,12 @@ int ggsw_external_product_to_dft(const MODULE* module, GLWECiphertextDFT* result
 #ifdef ENABLE_CUDA
 	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw_prepared->mat))
 	{
-		// ggsw_prepared->mat holds NTT-domain data (from ggsw_prepare_gpu); result stays NTT domain
+		// ggsw_prepared->mat holds NTT-domain data (from ggsw_prepare_gpu); result stays NTT domain.
+		// glwe's own limb count may be smaller than nrows (see ggsw_unprepared_external_product) —
+		// the GPU path zero-pads the missing rows rather than reading past glwe->vec.
+		uint64_t a_limbs = glwe_params_n_limbs(glwe->params);
 		gpu_ggsw_ext_prod_ntt_device((const int64_t*)glwe->vec, (const int64_t*)ggsw_prepared->mat,
-		                             (int64_t*)result->vec, nn, nrows, ncols_in);
+		                             (int64_t*)result->vec, nn, nrows, ncols_in, a_limbs);
 		return 0;
 	}
 #endif
@@ -188,12 +195,15 @@ int ggsw_external_product(const MODULE* module, GLWECiphertext* result, const GL
 #ifdef ENABLE_CUDA
 	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw_prepared->mat))
 	{
-		// NTT-domain VMP then INTT: mirrors ggsw_external_product_to_dft + glwe_dft_to_coef on GPU
+		// NTT-domain VMP then INTT: mirrors ggsw_external_product_to_dft + glwe_dft_to_coef on GPU.
+		// glwe's own limb count may be smaller than nrows (see ggsw_unprepared_external_product) —
+		// the GPU path zero-pads the missing rows rather than reading past glwe->vec.
+		uint64_t a_limbs               = glwe_params_n_limbs(glwe->params);
 		int64_t* d_tmp_ntt            = pvda_gpu_alloc((size_t)ncols_in * (size_t)nn);
 		GLWECiphertextDFT tmp_ntt_dft = {.params = result->params, .vec = (VecBivDFT*)d_tmp_ntt};
 
 		gpu_ggsw_ext_prod_ntt_device((const int64_t*)glwe->vec, (const int64_t*)ggsw_prepared->mat, d_tmp_ntt, nn,
-		                             nrows, ncols_in);
+		                             nrows, ncols_in, a_limbs);
 		glwe_dft_to_coef(module, result, &tmp_ntt_dft);
 
 		pvda_gpu_free(d_tmp_ntt);

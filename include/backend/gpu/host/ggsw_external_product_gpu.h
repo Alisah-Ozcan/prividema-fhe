@@ -66,14 +66,18 @@ GLWECiphertext* pvda_new_glwe_device(const GLWEParams* params);
 // ---------------------------------------------------------------------------
 // GPU external product — all pointer arguments must be CUDA device pointers.
 //
-// d_glwe   : [nrows * n]          — GLWE vector (already gadget-decomposed)
+// d_glwe   : [a_limbs * n]        — GLWE vector, a_limbs <= nrows (its own limb count;
+//                                    may be smaller than nrows when the GGSW selector's
+//                                    associated GLWE params differ from the ciphertext
+//                                    being multiplied — the missing rows are zero-padded,
+//                                    mirroring spqlios' implicit zero-padding on the CPU path)
 // d_ggsw   : [nrows * ncols * n]  — GGSW matrix, row-major
 // d_result : [ncols * n]          — output (written on device, caller downloads)
 //
 // Computes: d_result[j] = INTT( sum_i NTT(d_glwe[i]) * NTT(d_ggsw[i][j]) )
 // ---------------------------------------------------------------------------
 void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_ggsw, int64_t* d_result, size_t n,
-                                      size_t nrows, size_t ncols);
+                                      size_t nrows, size_t ncols, size_t a_limbs);
 
 // ---------------------------------------------------------------------------
 // GPU prepare — NTT of the full GGSW matrix on device.
@@ -88,12 +92,14 @@ void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw);
 // ---------------------------------------------------------------------------
 // NTT-domain VMP — GGSW is already NTT'd, result left in NTT domain (no INTT).
 //
-// d_glwe      : [nrows * n]          — raw int64_t on device
+// d_glwe      : [a_limbs * n]        — raw int64_t on device, a_limbs <= nrows (see
+//                                       gpu_ggsw_external_product_device — missing rows
+//                                       are zero-padded)
 // d_ggsw_ntt  : [nrows * ncols * n]  — NTT-domain int64_t on device (from ggsw_prepare_gpu)
 // d_result_ntt: [ncols * n]          — NTT-domain output on device
 // ---------------------------------------------------------------------------
 void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_ntt, int64_t* d_result_ntt, size_t n,
-                                  size_t nrows, size_t ncols);
+                                  size_t nrows, size_t ncols, size_t a_limbs);
 
 // ---------------------------------------------------------------------------
 // GPU INTT — convert NTT-domain GLWECiphertextDFT to coefficient-domain GLWECiphertext.
