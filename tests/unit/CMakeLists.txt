@@ -140,4 +140,21 @@ if(ENABLE_CUDA)
       ${PROJECT_SOURCE_DIR}/include/backend
   )
 
+  # test_glwe_ciphertext also has an #ifdef ENABLE_CUDA GPU variant (add_glwe/sub_glwe/normalize_glwe
+  # dispatch) — add GPU linking to that specific target (already created by BuildUnitTests above).
+  target_link_libraries(test_glwe_ciphertext PRIVATE PVDA_GPU CUDA::cudart)
+  target_compile_definitions(test_glwe_ciphertext PRIVATE ENABLE_CUDA)
+  target_include_directories(test_glwe_ciphertext PRIVATE
+      ${PROJECT_SOURCE_DIR}/include/backend
+  )
+
+  # test_tfhe also has an #ifdef ENABLE_CUDA GPU variant (tfhe_cmux, inherited from the
+  # GPU dispatch of sub_glwe/normalize_glwe/ggsw_external_product/add_glwe) — add GPU
+  # linking to that specific target (already created by BuildUnitTests above).
+  target_link_libraries(test_tfhe PRIVATE PVDA_GPU CUDA::cudart)
+  target_compile_definitions(test_tfhe PRIVATE ENABLE_CUDA)
+  target_include_directories(test_tfhe PRIVATE
+      ${PROJECT_SOURCE_DIR}/include/backend
+  )
+
 endif()

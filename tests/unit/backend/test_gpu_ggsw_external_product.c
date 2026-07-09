@@ -12,10 +12,10 @@
 
 /*
  {.nn                        = (1 << 14),
-	     .k                         = 1,
-	     .kappa                     = 19,
-	     .ciphertext_nb_limbs       = 15l * 2,
-	     .ciphertext_nb_limbs_tilde = 15l * 2,
+         .k                         = 1,
+         .kappa                     = 19,
+         .ciphertext_nb_limbs       = 15l * 2,
+         .ciphertext_nb_limbs_tilde = 15l * 2,
 */
 
 // Small parameters for fast testing
@@ -26,12 +26,12 @@
 //#define NB_LIMBS_T  2   // ciphertext_nb_limbs_tilde (GGSW rows)
 //#define COEF_MOD    16  // coefficients in [-8, 8)
 
-#define NN          (1 << 14)
-#define K           1
-#define KAPPA       19
-#define N_LIMBS     15l * 2  // ciphertext_nb_limbs (GLWE)
-#define NB_LIMBS_T  15l * 2   // ciphertext_nb_limbs_tilde (GGSW rows)
-#define COEF_MOD    16  // coefficients in [-8, 8)
+#define NN         (1 << 14)
+#define K          1
+#define KAPPA      19
+#define N_LIMBS    15l * 2  // ciphertext_nb_limbs (GLWE)
+#define NB_LIMBS_T 15l * 2  // ciphertext_nb_limbs_tilde (GGSW rows)
+#define COEF_MOD   16       // coefficients in [-8, 8)
 
 // nrows = NB_LIMBS_T, ncols = N_LIMBS
 // GLWE data  : nrows * NN  elements
@@ -46,8 +46,7 @@ Test(gpu_ggsw_ep, gpu_matches_cpu)
 {
 	srand(42);
 
-	GLWEParams* params_glwe =
-	    new_glwe_params(NN, K, KAPPA, N_LIMBS, 0.0, NOISE_UNIFORM_POWER_OF_TWO);
+	GLWEParams* params_glwe = new_glwe_params(NN, K, KAPPA, N_LIMBS, 0.0, NOISE_UNIFORM_POWER_OF_TWO);
 	cr_assert_not_null(params_glwe, "GLWEParams allocation failed");
 
 	GGSWParams* params_ggsw = new_ggsw_params(params_glwe, K, KAPPA, NB_LIMBS_T);
@@ -62,13 +61,11 @@ Test(gpu_ggsw_ep, gpu_matches_cpu)
 	// Allocate and fill CPU GLWE and GGSW with small random coefficients
 	GLWECiphertext* cpu_glwe = new_glwe(params_glwe);
 	cr_assert_not_null(cpu_glwe, "cpu_glwe allocation failed");
-	for (size_t i = 0; i < nrows * NN; i++)
-		cpu_glwe->vec[i] = (int64_t)(rand() % COEF_MOD) - COEF_MOD / 2;
+	for (size_t i = 0; i < nrows * NN; i++) cpu_glwe->vec[i] = (int64_t)(rand() % COEF_MOD) - COEF_MOD / 2;
 
 	GGSWCiphertext* cpu_ggsw = new_ggsw(params_ggsw);
 	cr_assert_not_null(cpu_ggsw, "cpu_ggsw allocation failed");
-	for (size_t i = 0; i < nrows * ncols * NN; i++)
-		cpu_ggsw->mat[i] = (int64_t)(rand() % COEF_MOD) - COEF_MOD / 2;
+	for (size_t i = 0; i < nrows * ncols * NN; i++) cpu_ggsw->mat[i] = (int64_t)(rand() % COEF_MOD) - COEF_MOD / 2;
 
 	// ---------------------------------------------------------------------------
 	// CPU external product (reference)
@@ -100,8 +97,8 @@ Test(gpu_ggsw_ep, gpu_matches_cpu)
 	GGSWCiphertext gpu_ggsw   = {.params = params_ggsw, .mat = pvda_ggsw_to_device(cpu_ggsw)};
 	GLWECiphertext gpu_result = {.params = params_glwe, .vec = pvda_gpu_alloc(result_elems)};
 
-	cr_assert_not_null(gpu_glwe.vec,   "pvda_glwe_to_device failed");
-	cr_assert_not_null(gpu_ggsw.mat,   "pvda_ggsw_to_device failed");
+	cr_assert_not_null(gpu_glwe.vec, "pvda_glwe_to_device failed");
+	cr_assert_not_null(gpu_ggsw.mat, "pvda_ggsw_to_device failed");
 	cr_assert_not_null(gpu_result.vec, "pvda_gpu_alloc for result failed");
 
 	ret = ggsw_unprepared_external_product(module, &gpu_result, &gpu_glwe, &gpu_ggsw);
@@ -118,8 +115,7 @@ Test(gpu_ggsw_ep, gpu_matches_cpu)
 
 	for (size_t i = 0; i < result_elems; i++)
 	{
-		cr_assert_eq(download_target->vec[i], cpu_result->vec[i],
-		             "Mismatch at element %zu: GPU=%lld  CPU=%lld", i,
+		cr_assert_eq(download_target->vec[i], cpu_result->vec[i], "Mismatch at element %zu: GPU=%lld  CPU=%lld", i,
 		             (long long)download_target->vec[i], (long long)cpu_result->vec[i]);
 	}
 

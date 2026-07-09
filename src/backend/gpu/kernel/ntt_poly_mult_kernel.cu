@@ -18,8 +18,8 @@ __global__ void vmp_accumulate_kernel(Data64* c_ntt, const Data64* a_ntt, const 
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx >= ncols * n) return;
 
-	int j = idx / n; // output polynomial index
-	int k = idx % n; // coefficient index
+	int j = idx / n;  // output polynomial index
+	int k = idx % n;  // coefficient index
 
 	Data64 acc = 0;
 	for (int i = 0; i < nrows; i++)

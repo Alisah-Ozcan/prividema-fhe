@@ -67,8 +67,8 @@ Test(avx_poly_mult, svp_matches_schoolbook)
 
 	for (int i = 0; i < POLY_SIZE; i++)
 	{
-		cr_assert_eq(C_avx[i], C_ref[i], "Mismatch at [%d]: AVX=%lld  Schoolbook=%lld", i,
-		             (long long)C_avx[i], (long long)C_ref[i]);
+		cr_assert_eq(C_avx[i], C_ref[i], "Mismatch at [%d]: AVX=%lld  Schoolbook=%lld", i, (long long)C_avx[i],
+		             (long long)C_ref[i]);
 	}
 
 	pvda_delete_svp_ppol(a_ppol);

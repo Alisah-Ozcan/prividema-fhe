@@ -107,8 +107,8 @@ Test(gpu_vs_avx, poly_mult_batch_results_match)
 		{
 			int64_t gpu_val = C_gpu[b * POLY_SIZE + i];
 			int64_t avx_val = C_avx[b * POLY_SIZE + i];
-			cr_assert_eq(gpu_val, avx_val, "Mismatch at batch=%d coef=%d: GPU=%lld  AVX=%lld", b, i,
-			             (long long)gpu_val, (long long)avx_val);
+			cr_assert_eq(gpu_val, avx_val, "Mismatch at batch=%d coef=%d: GPU=%lld  AVX=%lld", b, i, (long long)gpu_val,
+			             (long long)avx_val);
 		}
 	}
 

@@ -181,8 +181,7 @@ int ggsw_prepare(const PvdaBackend* module, GGSWCiphertextPrep* ggsw_prepared, c
 	if (pvda_is_device_pointer(ggsw_ct->mat))
 	{
 		// Free pre-allocated host mat (from new_ggsw_prep) if present
-		if (ggsw_prepared->mat && !pvda_is_device_pointer(ggsw_prepared->mat))
-			free(ggsw_prepared->mat);
+		if (ggsw_prepared->mat && !pvda_is_device_pointer(ggsw_prepared->mat)) free(ggsw_prepared->mat);
 		ggsw_prepare_gpu(ggsw_prepared, ggsw_ct);
 		return 0;
 	}
