@@ -72,7 +72,7 @@ void NTTParameterGenerator::initialize(size_t size)
 	VEC_GPU<Root64> intt_buf(cpu_intt.size());
 	ntt_buf.copy_from_host(cpu_ntt.data(), cpu_ntt.size());
 	intt_buf.copy_from_host(cpu_intt.data(), cpu_intt.size());
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 
 	Ninverse64 n_inv = OPERATOR64::modinv(static_cast<Data64>(size), carrier_prime_);
 

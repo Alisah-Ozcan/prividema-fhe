@@ -14,11 +14,11 @@ void gpu_vec_znx_add(const int64_t* a_host, const int64_t* b_host, int64_t* res_
 	int threads = 256;
 	int blocks  = ((int)total + threads - 1) / threads;
 
-	vec_znx_add_kernel<<<blocks, threads>>>(d_res.data(), d_a.data(), d_b.data(), (int)total);
+	vec_znx_add_kernel<<<blocks, threads, 0, gpu_active_stream>>>(d_res.data(), d_a.data(), d_b.data(), (int)total);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaDeviceSynchronize());
 
 	d_res.copy_to_host(res_host, total);
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_vec_znx_sub(const int64_t* a_host, const int64_t* b_host, int64_t* res_host, size_t n, size_t l)
@@ -31,11 +31,11 @@ void gpu_vec_znx_sub(const int64_t* a_host, const int64_t* b_host, int64_t* res_
 	int threads = 256;
 	int blocks  = ((int)total + threads - 1) / threads;
 
-	vec_znx_sub_kernel<<<blocks, threads>>>(d_res.data(), d_a.data(), d_b.data(), (int)total);
+	vec_znx_sub_kernel<<<blocks, threads, 0, gpu_active_stream>>>(d_res.data(), d_a.data(), d_b.data(), (int)total);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaDeviceSynchronize());
 
 	d_res.copy_to_host(res_host, total);
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_vec_znx_negate(const int64_t* a_host, int64_t* res_host, size_t n, size_t l)
@@ -47,11 +47,11 @@ void gpu_vec_znx_negate(const int64_t* a_host, int64_t* res_host, size_t n, size
 	int threads = 256;
 	int blocks  = ((int)total + threads - 1) / threads;
 
-	vec_znx_negate_kernel<<<blocks, threads>>>(d_res.data(), d_a.data(), (int)total);
+	vec_znx_negate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(d_res.data(), d_a.data(), (int)total);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaDeviceSynchronize());
 
 	d_res.copy_to_host(res_host, total);
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_vec_znx_add_device(const int64_t* a_dev, const int64_t* b_dev, int64_t* res_dev, size_t total)
@@ -59,9 +59,9 @@ void gpu_vec_znx_add_device(const int64_t* a_dev, const int64_t* b_dev, int64_t*
 	int threads = 256;
 	int blocks  = ((int)total + threads - 1) / threads;
 
-	vec_znx_add_kernel<<<blocks, threads>>>(res_dev, a_dev, b_dev, (int)total);
+	vec_znx_add_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, a_dev, b_dev, (int)total);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_vec_znx_sub_device(const int64_t* a_dev, const int64_t* b_dev, int64_t* res_dev, size_t total)
@@ -69,9 +69,9 @@ void gpu_vec_znx_sub_device(const int64_t* a_dev, const int64_t* b_dev, int64_t*
 	int threads = 256;
 	int blocks  = ((int)total + threads - 1) / threads;
 
-	vec_znx_sub_kernel<<<blocks, threads>>>(res_dev, a_dev, b_dev, (int)total);
+	vec_znx_sub_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, a_dev, b_dev, (int)total);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_vec_znx_negate_device(const int64_t* a_dev, int64_t* res_dev, size_t total)
@@ -79,9 +79,9 @@ void gpu_vec_znx_negate_device(const int64_t* a_dev, int64_t* res_dev, size_t to
 	int threads = 256;
 	int blocks  = ((int)total + threads - 1) / threads;
 
-	vec_znx_negate_kernel<<<blocks, threads>>>(res_dev, a_dev, (int)total);
+	vec_znx_negate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, a_dev, (int)total);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 }  // extern "C"

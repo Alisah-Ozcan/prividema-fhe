@@ -18,14 +18,13 @@
 #include "glwegadget_arithmetic.h"
 #include "glwegadget_ciphertext.h"
 #include "glwegadget_key.h"
+#include "gpu/common/gpu_nttparameters.h"
+#include "gpu/host/ggsw_external_product_gpu.h"
 #include "maths_structures.h"
 #include "schemes/tfhe.h"
 #include "spqlios_alias.h"
 #include "univariate_polynomial.h"
 #include "utils.h"
-
-#include "gpu/common/gpu_nttparameters.h"
-#include "gpu/host/ggsw_external_product_gpu.h"
 
 /*****************************************************************************
  * OnionPIR example using Half-products — GPU server.
@@ -181,8 +180,8 @@ int onionpir_server_gpu(const MODULE* module, const GGSWParams* ggsw_ksk_params,
 	}
 	packed_glwegadget_trace_expand(module, gptrs, MATRIX_ROWS, L_TILDE_Q1, row_query, ksks);
 
-	int64_t* d_row_trace_raw               = pvda_glwegadget_to_device(row_trace_unprep);
-	GLWEGadgetCiphertext gpu_row_trace_raw = {.params = mega_params, .mat = (MatBiv*)d_row_trace_raw};
+	int64_t* d_row_trace_raw                = pvda_glwegadget_to_device(row_trace_unprep);
+	GLWEGadgetCiphertext gpu_row_trace_raw  = {.params = mega_params, .mat = (MatBiv*)d_row_trace_raw};
 	GLWEGadgetCiphertextPrep* glwegad_trace = new_glwegadget_prep(mega_params);
 	glwegadget_prepare(module, glwegad_trace, &gpu_row_trace_raw);
 
@@ -192,7 +191,8 @@ int onionpir_server_gpu(const MODULE* module, const GGSWParams* ggsw_ksk_params,
 	// --- Half products (the main performance bottleneck) — fully on the GPU. ---
 	GLWECiphertextDFT tmp_glwe_dft_gpu = {
 	    .params = aggregation_params,
-	    .vec = (VecBivDFT*)pvda_gpu_alloc((size_t)glwe_params_n_limbs(aggregation_params) * (size_t)aggregation_params->nn)};
+	    .vec    = (VecBivDFT*)pvda_gpu_alloc((size_t)glwe_params_n_limbs(aggregation_params) *
+	                                         (size_t)aggregation_params->nn)};
 
 	struct timespec server_start;
 	clock_gettime(CLOCK_REALTIME, &server_start);
@@ -238,7 +238,7 @@ int onionpir_server_gpu(const MODULE* module, const GGSWParams* ggsw_ksk_params,
 	// intermediate nodes on the device too (see tfhe_cmux_tree_new_node). ---
 	GLWECiphertext* res_gpu = pvda_new_glwe_device(res->params);
 	tfhe_cmux_tree(module, res_gpu, (const GLWECiphertext**)glwe_tree_first_level, MATRIX_COLS,
-	              (const GGSWCiphertextPrep**)ggsw_trace, LOG2_COLS, 1);
+	               (const GGSWCiphertextPrep**)ggsw_trace, LOG2_COLS, 1);
 
 	pvda_glwe_from_device(res, res_gpu->vec);
 	delete_glwe(res_gpu);
@@ -357,7 +357,7 @@ int main(int argc, char* argv[])
 	double row_sigma             = sigma8;
 	GLWEParams* params_row_query = new_glwe_params(NBASE, KBASE, KAPPABASE, 16, row_sigma, NOISE_UNIFORM_POWER_OF_TWO);
 	GLWEGadgetParams* row_query_gad_params = new_glwegadget_params(params_row_query, KAPPABASE, L_TILDE_Q1);
-	double col_sigma             = sigma8;
+	double col_sigma                       = sigma8;
 	GLWEParams* params_col_query = new_glwe_params(NBASE, KBASE, KAPPABASE, 16, col_sigma, NOISE_UNIFORM_POWER_OF_TWO);
 	GLWEGadgetParams* col_query_gad_params = new_glwegadget_params(params_col_query, KAPPABASE, 8);
 

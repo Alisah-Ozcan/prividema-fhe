@@ -8,6 +8,7 @@
 # ----------------------------------------
 
 add_library(PVDA_GPU STATIC
+    common/gpu_stream.cu
     common/gpu_nttparameters.cu
     kernel/ntt_poly_mult_kernel.cu
     kernel/normalize_kernel.cu
