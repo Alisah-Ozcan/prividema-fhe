@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.10)
 
-# Collect all example source files — GPU-specific ones (*_gpu.c) are built separately
-# below, only when ENABLE_CUDA is set, since they call GPU functions directly.
+# Collect all example source files — GPU-specific ones (*_gpu*.c, e.g.
+# exemples_PIR_gpu.c / exemples_PIR_gpu_stream.c) are built separately below,
+# only when ENABLE_CUDA is set, since they call GPU functions directly.
 file(GLOB TEST_FILES *.c)
-list(FILTER TEST_FILES EXCLUDE REGEX ".*_gpu\\.c$")
+list(FILTER TEST_FILES EXCLUDE REGEX ".*_gpu.*\\.c$")
 
 # Create test executables for each test file
 foreach(test_file ${TEST_FILES})
@@ -22,7 +23,7 @@ foreach(test_file ${TEST_FILES})
 endforeach()
 
 if(ENABLE_CUDA)
-  file(GLOB GPU_TEST_FILES *_gpu.c)
+  file(GLOB GPU_TEST_FILES *_gpu*.c)
 
   foreach(test_file ${GPU_TEST_FILES})
     get_filename_component(test_name ${test_file} NAME_WE)
