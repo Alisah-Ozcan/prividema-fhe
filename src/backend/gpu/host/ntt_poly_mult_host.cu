@@ -29,7 +29,7 @@ void gpu_ntt_svp(const int64_t* a_host, const int64_t* b_host, int64_t* c_host, 
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = 0,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	// A: single polynomial NTT
 	VEC_GPU<Data64s> d_a_in(a_host, n);
@@ -42,7 +42,8 @@ void gpu_ntt_svp(const int64_t* a_host, const int64_t* b_host, int64_t* c_host, 
 	gpuntt::GPU_NTT(d_b_in.data(), d_b.data(), ntt_tab, mod, cfg_fwd, (int)batch);
 
 	// Pointwise multiply: d_b[j*n+i] *= d_a[i]
-	pointwise_mult_batch_kernel<<<blocks, threads>>>(d_b.data(), d_a.data(), mod, (int)n, (int)batch);
+	pointwise_mult_batch_kernel<<<blocks, threads, 0, gpu_active_stream>>>(d_b.data(), d_a.data(), mod, (int)n,
+	                                                                       (int)batch);
 	CUDA_CHECK(cudaGetLastError());
 
 	// Batch inverse NTT
@@ -52,12 +53,12 @@ void gpu_ntt_svp(const int64_t* a_host, const int64_t* b_host, int64_t* c_host, 
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = n_inv,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 	VEC_GPU<Data64s> d_c(n * batch);
 	gpuntt::GPU_INTT(d_b.data(), d_c.data(), intt_tab, mod, cfg_inv, (int)batch);
-	CUDA_CHECK(cudaDeviceSynchronize());
 
 	d_c.copy_to_host(c_host, n * batch);
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_ntt_vmp(const int64_t* a_host, const int64_t* m_host, int64_t* c_host, size_t n, size_t nrows, size_t ncols)
@@ -79,7 +80,7 @@ void gpu_ntt_vmp(const int64_t* a_host, const int64_t* m_host, int64_t* c_host, 
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = 0,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	// A vector: nrows polynomials, batched NTT
 	VEC_GPU<Data64s> d_a_in(a_host, n * nrows);
@@ -95,8 +96,8 @@ void gpu_ntt_vmp(const int64_t* a_host, const int64_t* m_host, int64_t* c_host, 
 	VEC_GPU<Data64> d_c_ntt(n * ncols);
 	int total  = (int)(n * ncols);
 	int blocks = (total + threads - 1) / threads;
-	vmp_accumulate_kernel<<<blocks, threads>>>(d_c_ntt.data(), d_a.data(), d_m.data(), mod, (int)n, (int)nrows,
-	                                           (int)ncols);
+	vmp_accumulate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(d_c_ntt.data(), d_a.data(), d_m.data(), mod,
+	                                                                 (int)n, (int)nrows, (int)ncols);
 	CUDA_CHECK(cudaGetLastError());
 
 	// Batched inverse NTT: ncols polynomials
@@ -106,12 +107,12 @@ void gpu_ntt_vmp(const int64_t* a_host, const int64_t* m_host, int64_t* c_host, 
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = n_inv,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 	VEC_GPU<Data64s> d_c(n * ncols);
 	gpuntt::GPU_INTT(d_c_ntt.data(), d_c.data(), intt_tab, mod, cfg_inv, (int)ncols);
-	CUDA_CHECK(cudaDeviceSynchronize());
 
 	d_c.copy_to_host(c_host, n * ncols);
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 }  // extern "C"

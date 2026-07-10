@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "gpu/common/gpu_stream.h"
+
 class CudaException : public std::exception {
    public:
 	CudaException(const std::string& file, int line, cudaError_t error) : file_(file), line_(line), error_(error) {}
@@ -124,7 +126,7 @@ class VEC_GPU {
 			abort();
 		}
 		if (size_ != size) allocate(size);
-		CUDA_CHECK(cudaMemcpy(d_ptr_, host_ptr, size * sizeof(T), cudaMemcpyHostToDevice));
+		CUDA_CHECK(cudaMemcpyAsync(d_ptr_, host_ptr, size * sizeof(T), cudaMemcpyHostToDevice, gpu_active_stream));
 	}
 
 	void copy_to_host(T* host_ptr, size_t size) const
@@ -140,7 +142,7 @@ class VEC_GPU {
 			fprintf(stderr, "VEC_GPU::copy_to_host: size exceeds device buffer\n");
 			abort();
 		}
-		CUDA_CHECK(cudaMemcpy(host_ptr, d_ptr_, size * sizeof(T), cudaMemcpyDeviceToHost));
+		CUDA_CHECK(cudaMemcpyAsync(host_ptr, d_ptr_, size * sizeof(T), cudaMemcpyDeviceToHost, gpu_active_stream));
 	}
 
 	T* data() const { return d_ptr_; }
@@ -155,7 +157,8 @@ class VEC_GPU {
 	{
 		if (!other.d_ptr_ || other.size_ == 0) return;
 		allocate(other.size_);
-		CUDA_CHECK(cudaMemcpy(d_ptr_, other.d_ptr_, other.size_ * sizeof(T), cudaMemcpyDeviceToDevice));
+		CUDA_CHECK(cudaMemcpyAsync(d_ptr_, other.d_ptr_, other.size_ * sizeof(T), cudaMemcpyDeviceToDevice,
+		                           gpu_active_stream));
 	}
 
 	void move_from(VEC_GPU& other)

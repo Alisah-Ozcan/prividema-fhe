@@ -20,13 +20,19 @@ int64_t* pvda_gpu_upload(const int64_t* host_ptr, size_t n_elements)
 {
 	Data64s* d_ptr = nullptr;
 	CUDA_CHECK(cudaMalloc((void**)&d_ptr, n_elements * sizeof(int64_t)));
-	CUDA_CHECK(cudaMemcpy(d_ptr, host_ptr, n_elements * sizeof(int64_t), cudaMemcpyHostToDevice));
+	CUDA_CHECK(
+	    cudaMemcpyAsync(d_ptr, host_ptr, n_elements * sizeof(int64_t), cudaMemcpyHostToDevice, gpu_active_stream));
 	return (int64_t*)d_ptr;
 }
 
 void pvda_gpu_download(int64_t* host_ptr, const int64_t* device_ptr, size_t n_elements)
 {
-	CUDA_CHECK(cudaMemcpy(host_ptr, device_ptr, n_elements * sizeof(int64_t), cudaMemcpyDeviceToHost));
+	// Downloads cross back into host memory that callers read immediately on
+	// return (no further stream sync at the call site), so this primitive
+	// keeps its synchronous contract despite using the active stream.
+	CUDA_CHECK(
+	    cudaMemcpyAsync(host_ptr, device_ptr, n_elements * sizeof(int64_t), cudaMemcpyDeviceToHost, gpu_active_stream));
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 int64_t* pvda_gpu_alloc(size_t n_elements)
@@ -40,10 +46,13 @@ void pvda_gpu_free(int64_t* device_ptr) { cudaFree(device_ptr); }
 
 void pvda_gpu_copy(int64_t* dst, const int64_t* src, size_t n_elements)
 {
-	CUDA_CHECK(cudaMemcpy(dst, src, n_elements * sizeof(int64_t), cudaMemcpyDeviceToDevice));
+	CUDA_CHECK(cudaMemcpyAsync(dst, src, n_elements * sizeof(int64_t), cudaMemcpyDeviceToDevice, gpu_active_stream));
 }
 
-void pvda_gpu_zero(int64_t* dst, size_t n_elements) { CUDA_CHECK(cudaMemset(dst, 0, n_elements * sizeof(int64_t))); }
+void pvda_gpu_zero(int64_t* dst, size_t n_elements)
+{
+	CUDA_CHECK(cudaMemsetAsync(dst, 0, n_elements * sizeof(int64_t), gpu_active_stream));
+}
 
 int64_t* pvda_glwe_to_device(const GLWECiphertext* glwe)
 {
@@ -100,7 +109,7 @@ void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_gg
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = 0,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	gpuntt::ntt_configuration<Data64> cfg_inv = {.n_power        = n_power,
 	                                             .ntt_type       = gpuntt::INVERSE,
@@ -108,7 +117,7 @@ void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_gg
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = n_inv,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	// NTT(GLWE): nrows polynomials expected by the VMP, but d_glwe only holds `a_limbs`
 	// valid polynomials (the GLWE's own limb count, which may differ from both nrows and
@@ -118,7 +127,8 @@ void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_gg
 	VEC_GPU<Data64> d_a_ntt(n * nrows);
 	size_t valid_rows = nrows < a_limbs ? nrows : a_limbs;
 	if (valid_rows < nrows)
-		CUDA_CHECK(cudaMemset(d_a_ntt.data() + valid_rows * n, 0, (nrows - valid_rows) * n * sizeof(Data64)));
+		CUDA_CHECK(cudaMemsetAsync(d_a_ntt.data() + valid_rows * n, 0, (nrows - valid_rows) * n * sizeof(Data64),
+		                           gpu_active_stream));
 	gpuntt::GPU_NTT((Data64s*)d_glwe, d_a_ntt.data(), ntt_tab, mod, cfg_fwd, (int)valid_rows);
 
 	// NTT(GGSW): nrows*ncols polynomials — input already on device
@@ -129,13 +139,13 @@ void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_gg
 	VEC_GPU<Data64> d_c_ntt(n * ncols);
 	int threads = 256;
 	int blocks  = ((int)(n * ncols) + threads - 1) / threads;
-	vmp_accumulate_kernel<<<blocks, threads>>>(d_c_ntt.data(), d_a_ntt.data(), d_m_ntt.data(), mod, (int)n, (int)nrows,
-	                                           (int)ncols);
+	vmp_accumulate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(d_c_ntt.data(), d_a_ntt.data(), d_m_ntt.data(),
+	                                                                 mod, (int)n, (int)nrows, (int)ncols);
 	CUDA_CHECK(cudaGetLastError());
 
 	// INTT: write directly into d_result (already on device, no D2H copy)
 	gpuntt::GPU_INTT(d_c_ntt.data(), (Data64s*)d_result, intt_tab, mod, cfg_inv, (int)ncols);
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw)
@@ -157,7 +167,7 @@ void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw)
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = 0,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	// Accept both host and device GGSW input
 	const int64_t* d_src;
@@ -176,7 +186,7 @@ void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw)
 	Data64* d_ntt = nullptr;
 	CUDA_CHECK(cudaMalloc((void**)&d_ntt, nrows * ncols * n * sizeof(Data64)));
 	gpuntt::GPU_NTT((Data64s*)d_src, d_ntt, ntt_tab, mod, cfg_fwd, (int)(nrows * ncols));
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 
 	if (d_tmp) pvda_gpu_free(d_tmp);
 
@@ -199,7 +209,7 @@ void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_n
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = 0,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	// NTT(GLWE): nrows polynomials expected by the VMP, but d_glwe only holds `a_limbs`
 	// valid polynomials (the GLWE's own limb count). Zero-pad the missing rows instead
@@ -207,20 +217,22 @@ void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_n
 	VEC_GPU<Data64> d_a_ntt(n * nrows);
 	size_t valid_rows = nrows < a_limbs ? nrows : a_limbs;
 	if (valid_rows < nrows)
-		CUDA_CHECK(cudaMemset(d_a_ntt.data() + valid_rows * n, 0, (nrows - valid_rows) * n * sizeof(Data64)));
+		CUDA_CHECK(cudaMemsetAsync(d_a_ntt.data() + valid_rows * n, 0, (nrows - valid_rows) * n * sizeof(Data64),
+		                           gpu_active_stream));
 	gpuntt::GPU_NTT((Data64s*)d_glwe, d_a_ntt.data(), ntt_tab, mod, cfg_fwd, (int)valid_rows);
 
 	// d_ggsw_ntt is already in NTT domain — use directly
 	VEC_GPU<Data64> d_c_ntt(n * ncols);
 	int threads = 256;
 	int blocks  = ((int)(n * ncols) + threads - 1) / threads;
-	vmp_accumulate_kernel<<<blocks, threads>>>(d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_ggsw_ntt, mod, (int)n,
-	                                           (int)nrows, (int)ncols);
+	vmp_accumulate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(
+	    d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_ggsw_ntt, mod, (int)n, (int)nrows, (int)ncols);
 	CUDA_CHECK(cudaGetLastError());
 
 	// Store NTT-domain result — no INTT
-	CUDA_CHECK(cudaMemcpy(d_result_ntt, d_c_ntt.data(), n * ncols * sizeof(int64_t), cudaMemcpyDeviceToDevice));
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaMemcpyAsync(d_result_ntt, d_c_ntt.data(), n * ncols * sizeof(int64_t), cudaMemcpyDeviceToDevice,
+	                           gpu_active_stream));
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void glwe_dft_to_coef_gpu(GLWECiphertext* d_result, const GLWECiphertextDFT* d_glwe_ntt)
@@ -242,11 +254,11 @@ void glwe_dft_to_coef_gpu(GLWECiphertext* d_result, const GLWECiphertextDFT* d_g
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = n_inv,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	// GPU_INTT input is Data64* (unsigned NTT domain); output is Data64s* (signed coef domain)
 	gpuntt::GPU_INTT((Data64*)d_glwe_ntt->vec, (Data64s*)d_result->vec, intt_tab, mod, cfg_inv, (int)ncols);
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 int64_t* pvda_glwegadget_to_device(const GLWEGadgetCiphertext* glwegad)
@@ -275,7 +287,7 @@ void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadget
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = 0,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	const int64_t* d_src;
 	int64_t* d_tmp = nullptr;
@@ -292,7 +304,7 @@ void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadget
 	Data64* d_ntt = nullptr;
 	CUDA_CHECK(cudaMalloc((void**)&d_ntt, nrows * ncols * n * sizeof(Data64)));
 	gpuntt::GPU_NTT((Data64s*)d_src, d_ntt, ntt_tab, mod, cfg_fwd, (int)(nrows * ncols));
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 
 	if (d_tmp) pvda_gpu_free(d_tmp);
 
@@ -317,7 +329,7 @@ void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwega
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = 0,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	gpuntt::ntt_configuration<Data64> cfg_inv = {.n_power        = n_power,
 	                                             .ntt_type       = gpuntt::INVERSE,
@@ -325,7 +337,7 @@ void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwega
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = n_inv,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	// NTT(a): nrows=l_tilde polynomials
 	VEC_GPU<Data64> d_a_ntt(n * nrows);
@@ -335,13 +347,13 @@ void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwega
 	VEC_GPU<Data64> d_c_ntt(n * ncols);
 	int threads = 256;
 	int blocks  = ((int)(n * ncols) + threads - 1) / threads;
-	vmp_accumulate_kernel<<<blocks, threads>>>(d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_glwegad_ntt, mod,
-	                                           (int)n, (int)nrows, (int)ncols);
+	vmp_accumulate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(
+	    d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_glwegad_ntt, mod, (int)n, (int)nrows, (int)ncols);
 	CUDA_CHECK(cudaGetLastError());
 
 	// INTT: result in coefficient domain
 	gpuntt::GPU_INTT(d_c_ntt.data(), (Data64s*)d_result, intt_tab, mod, cfg_inv, (int)ncols);
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_glwegadget_half_prod_ntt_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result_ntt,
@@ -360,7 +372,7 @@ void gpu_glwegadget_half_prod_ntt_device(const int64_t* d_a, const int64_t* d_gl
 	                                             .reduction_poly = gpuntt::X_N_plus,
 	                                             .zero_padding   = false,
 	                                             .mod_inverse    = 0,
-	                                             .stream         = 0};
+	                                             .stream         = gpu_active_stream};
 
 	// NTT(a): nrows=l_tilde polynomials
 	VEC_GPU<Data64> d_a_ntt(n * nrows);
@@ -370,12 +382,13 @@ void gpu_glwegadget_half_prod_ntt_device(const int64_t* d_a, const int64_t* d_gl
 	VEC_GPU<Data64> d_c_ntt(n * ncols);
 	int threads = 256;
 	int blocks  = ((int)(n * ncols) + threads - 1) / threads;
-	vmp_accumulate_kernel<<<blocks, threads>>>(d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_glwegad_ntt, mod,
-	                                           (int)n, (int)nrows, (int)ncols);
+	vmp_accumulate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(
+	    d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_glwegad_ntt, mod, (int)n, (int)nrows, (int)ncols);
 	CUDA_CHECK(cudaGetLastError());
 
-	CUDA_CHECK(cudaMemcpy(d_result_ntt, d_c_ntt.data(), n * ncols * sizeof(int64_t), cudaMemcpyDeviceToDevice));
-	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaMemcpyAsync(d_result_ntt, d_c_ntt.data(), n * ncols * sizeof(int64_t), cudaMemcpyDeviceToDevice,
+	                           gpu_active_stream));
+	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 }  // extern "C"

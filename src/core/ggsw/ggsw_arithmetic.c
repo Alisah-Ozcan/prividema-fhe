@@ -198,7 +198,7 @@ int ggsw_external_product(const MODULE* module, GLWECiphertext* result, const GL
 		// NTT-domain VMP then INTT: mirrors ggsw_external_product_to_dft + glwe_dft_to_coef on GPU.
 		// glwe's own limb count may be smaller than nrows (see ggsw_unprepared_external_product) —
 		// the GPU path zero-pads the missing rows rather than reading past glwe->vec.
-		uint64_t a_limbs               = glwe_params_n_limbs(glwe->params);
+		uint64_t a_limbs              = glwe_params_n_limbs(glwe->params);
 		int64_t* d_tmp_ntt            = pvda_gpu_alloc((size_t)ncols_in * (size_t)nn);
 		GLWECiphertextDFT tmp_ntt_dft = {.params = result->params, .vec = (VecBivDFT*)d_tmp_ntt};
 
