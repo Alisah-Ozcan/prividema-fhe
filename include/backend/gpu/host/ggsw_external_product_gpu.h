@@ -173,6 +173,11 @@ void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadget
 //                                            automorphism KSK's own precision vs the
 //                                            GLWE ciphertext being transformed).
 // ---------------------------------------------------------------------------
+// Allocates internal NTT scratch buffers (d_a_ntt, d_c_ntt) that are only
+// safe to free once the NTT/VMP/INTT pipeline touching them has actually
+// finished, so — unlike the plain vec_znx _device functions in
+// vec_znx_arith_host.h, which have no internal scratch to protect — this
+// DOES synchronize internally before returning.
 void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result, size_t n,
                                      size_t nrows, size_t ncols_in, size_t ncols_out);
 
