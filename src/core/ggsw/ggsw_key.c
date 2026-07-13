@@ -9,6 +9,10 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
+#ifdef ENABLE_CUDA
+#include "gpu/host/ggsw_external_product_gpu.h"
+#endif
+
 int generate_glwegad_to_ggsw_ksk(const MODULE* module, GGSWCiphertextPrep** ggsw_ksks, const GGSWParams* ggsw_params,
                                  const GLWESecretKeyPrepared* sk_prep)
 {
@@ -36,7 +40,29 @@ int generate_glwegad_to_ggsw_ksk(const MODULE* module, GGSWCiphertextPrep** ggsw
 		}
 		CHECK_CALL(ggsw_secret_encrypt(module, tmp_ggsw, sk_prep, neg_sk_i),
 		           "GGSW encryption failed in GGSW KSK generation");
-		CHECK_CALL(ggsw_prepare(module, ggsw_ksks[i], tmp_ggsw), "GGSW preparation failed in GGSW KSK generation");
+
+#ifdef ENABLE_CUDA
+		// ggsw_ksks[i]->mat being device-resident (see pvda_new_ggsw_prep_device)
+		// signals "NTT-prepare this KSK entry on the GPU" — same DFT-vs-NTT
+		// incompatibility as prepare_automorphism_key: upload the raw
+		// (unprepared) tmp_ggsw and let ggsw_prepare's own device dispatch
+		// NTT-prepare it correctly, rather than byte-copying a CPU-DFT result.
+		if (pvda_is_device_pointer(ggsw_ksks[i]->mat))
+		{
+			pvda_gpu_free((int64_t*)ggsw_ksks[i]->mat);  // free the placeholder ourselves —
+			                                             // ggsw_prepare only frees a stale *host* mat
+			ggsw_ksks[i]->mat           = NULL;
+			int64_t* d_raw              = pvda_ggsw_to_device(tmp_ggsw);
+			GGSWCiphertext raw_dev_view = {.params = tmp_ggsw->params, .mat = (MatBiv*)d_raw};
+			CHECK_CALL(ggsw_prepare(module, ggsw_ksks[i], &raw_dev_view),
+			           "GGSW GPU preparation failed in GGSW KSK generation");
+			pvda_gpu_free(d_raw);
+		}
+		else
+#endif
+		{
+			CHECK_CALL(ggsw_prepare(module, ggsw_ksks[i], tmp_ggsw), "GGSW preparation failed in GGSW KSK generation");
+		}
 	}
 
 	status = 0;

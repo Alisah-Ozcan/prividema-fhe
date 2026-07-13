@@ -21,6 +21,8 @@
 
 #ifdef ENABLE_CUDA
 #include "gpu/host/ggsw_external_product_gpu.h"
+#include "gpu/host/vec_znx_arith_host.h"
+#include "gpu/host/vec_znx_rotate_automorphism_host.h"
 #endif
 
 int glwegadget_half_prod(const MODULE* module, GLWECiphertext* result,
@@ -36,11 +38,22 @@ int glwegadget_half_prod(const MODULE* module, GLWECiphertext* result,
 #ifdef ENABLE_CUDA
 	if (pvda_is_device_pointer(glwegadget_prep_ct->mat) && pvda_is_device_pointer(result->vec))
 	{
-		// Upload first nrows=l_tilde coef-domain limb polynomials of `a` to device
-		int64_t* d_a = pvda_gpu_upload(a->ptr, (size_t)nrows * (size_t)nn);
-		gpu_glwegadget_half_prod_device(d_a, (const int64_t*)glwegadget_prep_ct->mat, (int64_t*)result->vec, nn, nrows,
-		                                ncols_in);
-		pvda_gpu_free(d_a);
+		if (pvda_is_device_pointer(a->ptr))
+		{
+			// `a` is already device-resident (e.g. a GPU-computed automorphism
+			// scratch buffer from glwegadget_automorphism) — use it directly,
+			// no host round trip.
+			gpu_glwegadget_half_prod_device((const int64_t*)a->ptr, (const int64_t*)glwegadget_prep_ct->mat,
+			                                (int64_t*)result->vec, nn, nrows, ncols_in, ncols_out);
+		}
+		else
+		{
+			// Upload first nrows=l_tilde coef-domain limb polynomials of `a` to device
+			int64_t* d_a = pvda_gpu_upload(a->ptr, (size_t)nrows * (size_t)nn);
+			gpu_glwegadget_half_prod_device(d_a, (const int64_t*)glwegadget_prep_ct->mat, (int64_t*)result->vec, nn,
+			                                nrows, ncols_in, ncols_out);
+			pvda_gpu_free(d_a);
+		}
 		return 0;
 	}
 #endif
@@ -187,8 +200,32 @@ int prepare_automorphism_key(const MODULE* module, GLWEAutomorphismKSK* automorp
 		//GLWEGadget(sigma_p(sk_i))
 		CHECK_CALL(glwegadget_secret_encrypt(module, glwegad_tmp, glwe_key, auto_sk_tmp),
 		           "GLWEGadget encryption failed in autmorphism KSK preparation");
-		CHECK_CALL(glwegadget_prepare(module, gadget_ciph, glwegad_tmp),
-		           "GLWEGadget preparation failed in automorphism KSK preparation");
+
+#ifdef ENABLE_CUDA
+		// gadget_ciph->mat being device-resident (see pvda_new_glwegadget_prep_device)
+		// signals "NTT-prepare this KSK entry on the GPU" — CPU glwegadget_prepare
+		// produces a spqlios DFT-domain matrix, GPU glwegadget_prepare_gpu an
+		// NTT-domain one; same footprint, incompatible content, so we can't just
+		// byte-copy the CPU-prepared result to device afterwards. Upload the raw
+		// (unprepared, coefficient-domain) gadget_tmp instead and let
+		// glwegadget_prepare's own device dispatch NTT-prepare it correctly.
+		if (pvda_is_device_pointer(gadget_ciph->mat))
+		{
+			pvda_gpu_free((int64_t*)gadget_ciph->mat);  // free the placeholder ourselves —
+			                                            // glwegadget_prepare only frees a stale *host* mat
+			gadget_ciph->mat                  = NULL;
+			int64_t* d_raw                    = pvda_glwegadget_to_device(glwegad_tmp);
+			GLWEGadgetCiphertext raw_dev_view = {.params = glwegad_tmp->params, .mat = (MatBiv*)d_raw};
+			CHECK_CALL(glwegadget_prepare(module, gadget_ciph, &raw_dev_view),
+			           "GLWEGadget GPU preparation failed in automorphism KSK preparation");
+			pvda_gpu_free(d_raw);
+		}
+		else
+#endif
+		{
+			CHECK_CALL(glwegadget_prepare(module, gadget_ciph, glwegad_tmp),
+			           "GLWEGadget preparation failed in automorphism KSK preparation");
+		}
 	}
 
 	status = 0;
@@ -213,6 +250,100 @@ int glwegadget_automorphism(const MODULE* module, GLWECiphertext* result, const 
 	// It is the maximum of the input b precision and the number of columns (GLWEGaget l_tilde precision) in the
 	// key-switching key
 	uint64_t biv_l = l_b_result > nrows ? l_b_result : nrows;
+
+#ifdef ENABLE_CUDA
+	// automorphism_ksk->enc_s[0]->mat must also be device-resident: auto_tmp
+	// below is a device buffer, and glwegadget_half_prod only takes its own
+	// GPU branch (which accepts a device `a`) when glwegadget_prep_ct->mat is
+	// a device pointer too — otherwise it falls back to a CPU path that
+	// would dereference our device auto_tmp as host memory.
+	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(result->vec) &&
+	    pvda_is_device_pointer(automorphism_ksk->enc_s[0]->mat))
+	{
+		int status_gpu      = -1;
+		int64_t* d_auto_tmp = pvda_gpu_alloc(biv_l * nn);
+		int64_t* d_glwe_tmp = NULL;
+		PolyBiv auto_tmp    = new_biv_view(nn, biv_l, (int64_t)nn, (PolyBivUnderlying*)d_auto_tmp);
+
+		if (k == 1)
+		{
+			// auto_tmp = auto_p(a)
+			PolyBiv a = glwe_extract_poly_view(glwe, 0);
+			gpu_vec_znx_automorphism_device(automorphism_p, (const int64_t*)a.ptr, d_auto_tmp, nn, biv_l, (int64_t)nn,
+			                                a.l, a.stride);
+
+			// result = halfProd(C_auto(-s), auto(a)) = -halfProd(C_auto(s), a)
+			CHECK_CALL_LABEL(glwegadget_half_prod(module, result, automorphism_ksk->enc_s[0], &auto_tmp),
+			                 "half product in GPU automorphism failed", cleanup_gpu);
+
+			// auto_tmp = auto_p(b)
+			PolyBiv b = glwe_extract_poly_view(glwe, k);
+			gpu_vec_znx_automorphism_device(automorphism_p, (const int64_t*)b.ptr, d_auto_tmp, nn, biv_l, (int64_t)nn,
+			                                b.l, b.stride);
+
+			// result += auto_tmp ==> result = -halfProc(c_auto(s), auto(a)) + (0, auto(b))
+			// (result_b and auto_tmp are never aliased here, so — unlike the CPU
+			// vec_znx_add_ref this mirrors — there's no "in-place tail is a no-op"
+			// case to worry about: just add over their common limb count.)
+			PolyBiv result_b   = glwe_extract_poly_view(result, k);
+			uint64_t add_limbs = result_b.l < biv_l ? result_b.l : biv_l;
+			for (uint64_t i = 0; i < add_limbs; ++i)
+			{
+				int64_t* row = (int64_t*)(result_b.ptr + (int64_t)i * result_b.stride);
+				gpu_vec_znx_add_device(row, d_auto_tmp + (int64_t)i * nn, row, nn);
+			}
+		}
+		else
+		{
+			d_glwe_tmp                  = pvda_gpu_alloc(glwe_coef_number(result->params));
+			GLWECiphertext glwe_tmp_dev = {.params = result->params, .vec = (VecBiv*)d_glwe_tmp};
+
+			// auto_tmp = auto_p(a_0)
+			PolyBiv a_0 = glwe_extract_poly_view(glwe, 0);
+			gpu_vec_znx_automorphism_device(automorphism_p, (const int64_t*)a_0.ptr, d_auto_tmp, nn, biv_l, (int64_t)nn,
+			                                a_0.l, a_0.stride);
+
+			// result = halfProd(C_auto(-s_0), auto(a_0))
+			CHECK_CALL_LABEL(glwegadget_half_prod(module, result, automorphism_ksk->enc_s[0], &auto_tmp),
+			                 "half product in GPU automorphism failed", cleanup_gpu);
+
+			for (int i = 1; i < k; ++i)
+			{
+				// auto_tmp = auto_p(a_i)
+				PolyBiv a_i = glwe_extract_poly_view(glwe, i);
+				gpu_vec_znx_automorphism_device(automorphism_p, (const int64_t*)a_i.ptr, d_auto_tmp, nn, biv_l,
+				                                (int64_t)nn, a_i.l, a_i.stride);
+
+				// result = halfProd(C_auto(-s_i), auto(a_i)) = -halfProd(C_auto(s_i), a_i)
+				CHECK_CALL_LABEL(glwegadget_half_prod(module, &glwe_tmp_dev, automorphism_ksk->enc_s[i], &auto_tmp),
+				                 "half product in GPU automorphism failed", cleanup_gpu);
+
+				add_glwe(module, result, result, &glwe_tmp_dev);
+			}
+
+			// auto_tmp = auto_p(b)
+			PolyBiv b = glwe_extract_poly_view(glwe, k);
+			gpu_vec_znx_automorphism_device(automorphism_p, (const int64_t*)b.ptr, d_auto_tmp, nn, biv_l, (int64_t)nn,
+			                                b.l, b.stride);
+
+			// result += auto_tmp ==> result = -sum_i(halfProd(c_auto(s), auto(a_i))) + (0, auto(b))
+			PolyBiv result_b   = glwe_extract_poly_view(result, k);
+			uint64_t add_limbs = result_b.l < biv_l ? result_b.l : biv_l;
+			for (uint64_t i = 0; i < add_limbs; ++i)
+			{
+				int64_t* row = (int64_t*)(result_b.ptr + (int64_t)i * result_b.stride);
+				gpu_vec_znx_add_device(row, d_auto_tmp + (int64_t)i * nn, row, nn);
+			}
+		}
+
+		status_gpu = 0;
+	cleanup_gpu:
+		pvda_gpu_free(d_auto_tmp);
+		if (d_glwe_tmp) pvda_gpu_free(d_glwe_tmp);
+		return status_gpu;
+	}
+#endif
+
 	if (k == 1)
 	{
 		PolyBiv* auto_tmp = new_biv_custom_params(result->params->nn, biv_l);
@@ -348,6 +479,24 @@ int glwe_to_glwe_keyswitch(const MODULE* module, GLWECiphertext* result, const G
 	return status;
 }
 
+// In-place rotate of a flattened GLWE view, dispatching to the GPU when its
+// backing buffer is device-resident (see gpu_vec_znx_rotate_device — safe
+// in-place since it computes into an internal scratch buffer before writing
+// back). Falls back to the CPU reference otherwise.
+static void glwe_rotate_flattened_inplace(const MODULE* module, int64_t p, PolyBiv* tmp_flattened)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(tmp_flattened->ptr))
+	{
+		gpu_vec_znx_rotate_device(p, (const int64_t*)tmp_flattened->ptr, (int64_t*)tmp_flattened->ptr,
+		                          tmp_flattened->nn, tmp_flattened->l, tmp_flattened->stride, tmp_flattened->l,
+		                          tmp_flattened->stride);
+		return;
+	}
+#endif
+	pvda_vec_znx_rotate(module, p, tmp_flattened, tmp_flattened);
+}
+
 int glwe_trace_expand(const MODULE* module, GLWECiphertext** results, int res_size, const GLWECiphertext* glwe_ct,
                       const GLWEAutomorphismKSKCollection* ksks)
 {
@@ -357,8 +506,29 @@ int glwe_trace_expand(const MODULE* module, GLWECiphertext** results, int res_si
 
 	glwe_copy(results[0], glwe_ct);
 
-	GLWECiphertext* tmp_glwe  = new_glwe(glwe_ct->params);
-	GLWECiphertext* tmp_glwe2 = new_glwe(glwe_ct->params);
+	GLWECiphertext* tmp_glwe;
+	GLWECiphertext* tmp_glwe2;
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(glwe_ct->vec))
+	{
+		// Keep the scratch buffers on-device too, so every op below
+		// (glwegadget_automorphism, add_glwe, sub_glwe,
+		// glwe_rotate_flattened_inplace, normalize_glwe) sees an
+		// all-device operand set and takes its GPU branch.
+		tmp_glwe  = pvda_new_glwe_device(glwe_ct->params);
+		tmp_glwe2 = pvda_new_glwe_device(glwe_ct->params);
+		// pvda_new_glwe_device leaves its buffer uninitialised (unlike
+		// new_glwe's calloc below) — zero it to match.
+		size_t tmp_elems = glwe_coef_number(glwe_ct->params);
+		pvda_gpu_zero((int64_t*)tmp_glwe->vec, tmp_elems);
+		pvda_gpu_zero((int64_t*)tmp_glwe2->vec, tmp_elems);
+	}
+	else
+#endif
+	{
+		tmp_glwe  = new_glwe(glwe_ct->params);
+		tmp_glwe2 = new_glwe(glwe_ct->params);
+	}
 	CHECK_ALLOC(tmp_glwe, "Temp memory alloc in trace expansion failed");
 	CHECK_ALLOC(tmp_glwe2, "Temp memory alloc in trace expansion failed");
 
@@ -369,7 +539,7 @@ int glwe_trace_expand(const MODULE* module, GLWECiphertext** results, int res_si
 
 	sub_glwe(module, tmp_glwe, results[0], tmp_glwe);
 	PolyBiv tmp_flattened = glwe_flattened_biv(tmp_glwe);
-	pvda_vec_znx_rotate(module, -1, &tmp_flattened, &tmp_flattened);
+	glwe_rotate_flattened_inplace(module, -1, &tmp_flattened);
 	normalize_glwe(module, results[1], tmp_glwe);
 	normalize_glwe(module, results[0], tmp_glwe2);
 
@@ -389,7 +559,7 @@ int glwe_trace_expand(const MODULE* module, GLWECiphertext** results, int res_si
 			add_glwe(module, tmp_glwe2, results[b], tmp_glwe);
 
 			sub_glwe(module, tmp_glwe, results[b], tmp_glwe);
-			pvda_vec_znx_rotate(module, -p, &tmp_flattened, &tmp_flattened);
+			glwe_rotate_flattened_inplace(module, -(int64_t)p, &tmp_flattened);
 			normalize_glwe(module, results[b + dist], tmp_glwe);
 			normalize_glwe(module, results[b], tmp_glwe2);
 		}

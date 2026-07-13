@@ -124,6 +124,12 @@ if(ENABLE_CUDA)
 
   BuildCudaTests(TEST_GPU_FILES)
 
+  # test_gpu_glwegadget_automorphism / test_gpu_trace_expand need the shared
+  # test-utils helpers (assert_tnx_close_enough / info_bits_half_prod /
+  # rnx_random_vec) that plain BuildCudaTests targets don't link by default.
+  target_link_libraries(test_gpu_glwegadget_automorphism PRIVATE PVDA_UTEST_UTILS)
+  target_link_libraries(test_gpu_trace_expand PRIVATE PVDA_UTEST_UTILS)
+
   # test_ggsw_external_product also has an #ifdef ENABLE_CUDA GPU variant —
   # add GPU linking to that specific target (already created by BuildUnitTests above).
   target_link_libraries(test_ggsw_external_product PRIVATE PVDA_GPU CUDA::cudart)

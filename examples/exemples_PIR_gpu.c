@@ -28,26 +28,6 @@
 
 /*****************************************************************************
  * OnionPIR example using Half-products — GPU server.
- *
- * Same protocol as exemples_PIR.c, but the server-side work is moved to the
- * GPU. It reuses the exact same building blocks (packed_glwegadget_trace_expand,
- * glwegadget_half_prod_prepared_to_dft, glwe_dft_to_coef, tfhe_cmux_tree) — all
- * of those already dispatch to their GPU kernels whenever they're handed CUDA
- * device pointers (see pvda_is_device_pointer checks throughout the core lib).
- *
- * Query expansion (unpacking the client's packed row/column selectors) still
- * runs on the CPU: it relies on automorphisms/rotations
- * (pvda_vec_znx_automorphism / pvda_vec_znx_rotate), which have no GPU kernel
- * in this codebase. Its output (a small raw GLWEGadget / a handful of raw
- * GGSWs) is then uploaded once per query and NTT-prepared on the GPU through
- * the existing glwegadget_prepare / ggsw_prepare dispatch, exactly like
- * ggsw_prepare_gpu is used elsewhere.
- *
- * The actual bottleneck — the 256 column half-products and the 256-leaf CMux
- * tree — runs entirely on the GPU: the database columns are precomputed once
- * (uploaded raw, un-NTT'd — the GPU half-product kernel does the NTT itself
- * on every call) and reused, read-only, across every future query.
- *
  * See:
  * OnionPIR: https://eprint.iacr.org/2021/1081
  * OnionPIRv2: https://eprint.iacr.org/2025/1142
@@ -166,26 +146,35 @@ int onionpir_server_gpu(const MODULE* module, const GGSWParams* ggsw_ksk_params,
 	GLWEGadgetParams* mega_params = new_glwegadget_params(query1_params->params_glwe, query1_params->kappa_tilde,
 	                                                      query1_params->l_tilde * MATRIX_ROWS);
 
-	// --- Row query expansion: CPU-only (automorphisms/rotations have no GPU
-	// kernel here), then upload the raw result once and NTT-prepare it on the
-	// GPU through the existing glwegadget_prepare dispatch. ---
+	// row_query/col_query are still per-query, CPU-encrypted ciphertexts (RNG
+	// sampling has no GPU path) — upload them once so every downstream op
+	// (glwegadget_automorphism, glwe_rotate_flattened_inplace, add_glwe, ...)
+	// sees a device-resident source and takes its GPU branch.
+	int64_t* d_row_query_vec     = pvda_glwe_to_device(row_query);
+	GLWECiphertext row_query_dev = {.params = row_query->params, .vec = (VecBiv*)d_row_query_vec};
+	int64_t* d_col_query_vec     = pvda_glwe_to_device(col_query);
+	GLWECiphertext col_query_dev = {.params = col_query->params, .vec = (VecBiv*)d_col_query_vec};
+
+	// --- Row query expansion — now fully on the GPU: row_trace_unprep is a
+	// device buffer, packed_glwegadget_trace_expand's automorphism/rotation
+	// steps dispatch through glwegadget_automorphism/glwe_trace_expand's GPU
+	// branches (see gpu/host/vec_znx_rotate_automorphism_host.h), and
+	// glwegadget_prepare below already dispatches to glwegadget_prepare_gpu
+	// once its raw input is device-resident. ---
 	GLWEGadgetCiphertext gadgets[MATRIX_ROWS];
 	GLWEGadgetCiphertext* gptrs[MATRIX_ROWS];
-	GLWEGadgetCiphertext* row_trace_unprep = new_glwegadget(mega_params);
+	GLWEGadgetCiphertext* row_trace_unprep = pvda_new_glwegadget_device(mega_params);
 	for (int r = 0; r < MATRIX_ROWS; ++r)
 	{
 		gadgets[r].params = query1_params;
 		gadgets[r].mat    = glwegadget_extract_bivglwe(row_trace_unprep, 1 + r * query1_params->l_tilde);
 		gptrs[r]          = &gadgets[r];
 	}
-	packed_glwegadget_trace_expand(module, gptrs, MATRIX_ROWS, L_TILDE_Q1, row_query, ksks);
+	packed_glwegadget_trace_expand(module, gptrs, MATRIX_ROWS, L_TILDE_Q1, &row_query_dev, ksks);
 
-	int64_t* d_row_trace_raw                = pvda_glwegadget_to_device(row_trace_unprep);
-	GLWEGadgetCiphertext gpu_row_trace_raw  = {.params = mega_params, .mat = (MatBiv*)d_row_trace_raw};
 	GLWEGadgetCiphertextPrep* glwegad_trace = new_glwegadget_prep(mega_params);
-	glwegadget_prepare(module, glwegad_trace, &gpu_row_trace_raw);
+	glwegadget_prepare(module, glwegad_trace, row_trace_unprep);
 
-	pvda_gpu_free(d_row_trace_raw);
 	delete_glwegadget(row_trace_unprep);
 
 	// --- Half products (the main performance bottleneck) — fully on the GPU. ---
@@ -213,25 +202,27 @@ int onionpir_server_gpu(const MODULE* module, const GGSWParams* ggsw_ksk_params,
 	pvda_gpu_free((int64_t*)tmp_glwe_dft_gpu.vec);
 	delete_glwegadget_prep(glwegad_trace);
 
-	// --- Column-selection query expansion: also CPU-only internally
-	// (automorphisms), then upload + NTT-prepare each resulting GGSW on the GPU
-	// through the existing ggsw_prepare dispatch. ---
+	// --- Column-selection query expansion — also fully on the GPU now:
+	// ggsw_trace_raw[] is device-resident, packed_glwegadget_trace_expand_ggsw's
+	// internal glwe_trace_expand + ggsw_external_product calls dispatch to
+	// their GPU branches, and ggsw_prepare below already dispatches to
+	// ggsw_prepare_gpu once its raw input is device-resident. ---
 	GGSWCiphertext* ggsw_trace_raw[LOG2_COLS] = {0};
-	for (int r = 0; r < LOG2_COLS; ++r) ggsw_trace_raw[r] = new_ggsw(ggsw_ksk_params);
+	for (int r = 0; r < LOG2_COLS; ++r) ggsw_trace_raw[r] = pvda_new_ggsw_device(ggsw_ksk_params);
 
 	packed_glwegadget_trace_expand_ggsw(module, ggsw_trace_raw, LOG2_COLS, ggsw_params_l_tilde_a(ggsw_ksk_params),
-	                                    col_query, ksks, ggsw_ksks);
+	                                    &col_query_dev, ksks, ggsw_ksks);
 
 	GGSWCiphertextPrep* ggsw_trace[LOG2_COLS] = {0};
 	for (int r = 0; r < LOG2_COLS; ++r)
 	{
-		int64_t* d_ggsw_raw         = pvda_ggsw_to_device(ggsw_trace_raw[r]);
-		GGSWCiphertext gpu_ggsw_raw = {.params = ggsw_ksk_params, .mat = (VecBiv*)d_ggsw_raw};
-		ggsw_trace[r]               = new_ggsw_prep(ggsw_ksk_params);
-		ggsw_prepare(module, ggsw_trace[r], &gpu_ggsw_raw);
-		pvda_gpu_free(d_ggsw_raw);
+		ggsw_trace[r] = new_ggsw_prep(ggsw_ksk_params);
+		ggsw_prepare(module, ggsw_trace[r], ggsw_trace_raw[r]);
 		delete_ggsw(ggsw_trace_raw[r]);
 	}
+
+	pvda_gpu_free(d_row_query_vec);
+	pvda_gpu_free(d_col_query_vec);
 
 	// --- CMux selection tree — entirely on the GPU: leaves, selectors and the
 	// result are all device-resident, and tfhe_cmux_tree allocates its own
@@ -248,8 +239,32 @@ int onionpir_server_gpu(const MODULE* module, const GGSWParams* ggsw_ksk_params,
 	return 0;
 }
 
-// Setup phase for the client in the protocol: secret and evaluation key generation
-// (identical to exemples_PIR.c — client-side, stays on the CPU).
+// Swaps every enc_s[i] of a freshly-allocated (host-prepared-by-default) KSK
+// for a device Prep placeholder, so the prepare_automorphism_key call right
+// after this NTT-prepares it on the GPU (see glwegadget_arithmetic.c's
+// #ifdef ENABLE_CUDA branch, gated on pvda_is_device_pointer(enc_s[i]->mat)).
+// Must run BEFORE prepare_automorphism_key — CPU glwegadget_prepare produces
+// a spqlios DFT-domain (double) matrix, GPU glwegadget_prepare_gpu an
+// NTT-domain (int64 residue) one; same footprint, incompatible content, so
+// there is no way to convert a CPU-prepared KSK into a GPU one after the
+// fact other than re-running preparation from the raw ciphertext.
+static void make_automorphism_ksk_device(GLWEAutomorphismKSK* ksk)
+{
+	uint64_t k = ksk->params->params_glwe->k;
+	for (uint64_t i = 0; i < k; ++i)
+	{
+		delete_glwegadget_prep(ksk->enc_s[i]);
+		ksk->enc_s[i] = pvda_new_glwegadget_prep_device(ksk->params);
+	}
+}
+
+// Setup phase for the client in the protocol: secret and evaluation key
+// generation. Same protocol as exemples_PIR.c's client phase0 — encryption
+// itself is RNG-based and stays on the CPU — but the KSKs are NTT-prepared
+// directly on the GPU (see make_automorphism_ksk_device/make_ggsw_ksk_device
+// above), a one-time setup cost, so every later per-query dispatch
+// (glwegadget_automorphism, glwegadget_half_prod, ggsw_external_product)
+// sees device-resident KSK material and takes its GPU branch.
 int onionpir_client_phase0(MODULE* module, GLWESecretKeyPrepared** sk_prep_out, int sk_bits, GLWEParams* sk_params,
                            GLWEAutomorphismKSKCollection** ksks_out, const GLWEGadgetParams* auto_ksk_params,
                            GGSWCiphertextPrep*** ggsw_ksks_out, const GGSWParams* auto_ggsw_params)
@@ -274,11 +289,13 @@ int onionpir_client_phase0(MODULE* module, GLWESecretKeyPrepared** sk_prep_out, 
 	{
 		int64_t p                = (int64_t)NBASE / (1LL << (i - 1)) + 1;
 		GLWEAutomorphismKSK* ksk = new_automorphism_ksk(auto_ksk_params);
+		make_automorphism_ksk_device(ksk);
 		prepare_automorphism_key(module, ksk, sk_prep, (int)p);
 		glwegadget_ksk_collection_put_key(ksks, ksk, p);
 	}
 
 	*ggsw_ksks_out = ggsw_ksks;
+	for (int i = 0; i < KBASE; ++i) ggsw_ksks[i] = pvda_new_ggsw_prep_device(auto_ggsw_params);
 	generate_glwegad_to_ggsw_ksk(module, ggsw_ksks, auto_ggsw_params, sk_prep);
 
 	status = 0;
@@ -384,6 +401,8 @@ int main(int argc, char* argv[])
 	GLWEAutomorphismKSKCollection* ksks;
 	GGSWCiphertextPrep** ggsw_ksks;
 
+	// KSKs are NTT-prepared directly on the GPU inside onionpir_client_phase0
+	// (see make_automorphism_ksk_device / pvda_new_ggsw_prep_device above).
 	onionpir_client_phase0(module, &sk_prep, 2, final_params, &ksks, auto_ksk_params, &ggsw_ksks, auto_ggsw_params);
 
 	// Server pre-processing: generate the database columns and upload them to

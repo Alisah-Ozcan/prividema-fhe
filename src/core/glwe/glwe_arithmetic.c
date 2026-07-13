@@ -29,12 +29,19 @@ int normalize_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphe
 #ifdef ENABLE_CUDA
 	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(result->vec))
 	{
+		// glwe and result may have different params (e.g. an automorphism
+		// KSK's own precision vs. the GLWE ciphertext being transformed, as
+		// in glwe_trace_expand) — aj_biv.l and res_biv.l can legitimately
+		// differ, so this must go through the sized kernel (see
+		// gpu_normalize_base2k_sized_device) rather than assuming a single
+		// shared l for both buffers.
 		for (uint64_t j = 0; j <= k; j++)
 		{
 			PolyBiv aj_biv  = glwe_extract_poly_view(glwe, j);
 			PolyBiv res_biv = glwe_extract_poly_view(result, j);
-			gpu_normalize_base2k_device((const int64_t*)aj_biv.ptr, (int64_t*)res_biv.ptr, aj_biv.nn, aj_biv.l,
-			                            aj_biv.stride, (uint32_t)kappa);
+			gpu_normalize_base2k_sized_device((const int64_t*)aj_biv.ptr, aj_biv.l, aj_biv.stride,
+			                                  (int64_t*)res_biv.ptr, res_biv.l, res_biv.stride, aj_biv.nn,
+			                                  (uint32_t)kappa);
 		}
 		return 0;
 	}
@@ -61,9 +68,17 @@ void add_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphertext
 	if (pvda_is_device_pointer(glwe_lhs->vec) && pvda_is_device_pointer(glwe_rhs->vec) &&
 	    pvda_is_device_pointer(result->vec))
 	{
-		size_t total = glwe_coef_number(result->params);
-		gpu_vec_znx_add_device((const int64_t*)glwe_lhs->vec, (const int64_t*)glwe_rhs->vec, (int64_t*)result->vec,
-		                       total);
+		// glwe_lhs/glwe_rhs/result may have differing params (e.g. an
+		// automorphism KSK's own precision vs. the GLWE ciphertext being
+		// transformed, as in glwe_trace_expand) — must not assume they all
+		// share glwe_coef_number(result->params). Mirrors the CPU path
+		// below (glwe_flattened_biv + pvda_vec_znx_add's independent
+		// res/a/b sizes) via gpu_vec_znx_add_sized_device.
+		size_t a_size   = glwe_params_n_limbs(glwe_lhs->params);
+		size_t b_size   = glwe_params_n_limbs(glwe_rhs->params);
+		size_t res_size = glwe_params_n_limbs(result->params);
+		gpu_vec_znx_add_sized_device((const int64_t*)glwe_lhs->vec, a_size, (const int64_t*)glwe_rhs->vec, b_size,
+		                             (int64_t*)result->vec, res_size, result->params->nn);
 		return;
 	}
 #endif
@@ -81,9 +96,12 @@ void sub_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphertext
 	if (pvda_is_device_pointer(glwe_lhs->vec) && pvda_is_device_pointer(glwe_rhs->vec) &&
 	    pvda_is_device_pointer(result->vec))
 	{
-		size_t total = glwe_coef_number(result->params);
-		gpu_vec_znx_sub_device((const int64_t*)glwe_lhs->vec, (const int64_t*)glwe_rhs->vec, (int64_t*)result->vec,
-		                       total);
+		// See add_glwe above — operands may have differing params.
+		size_t a_size   = glwe_params_n_limbs(glwe_lhs->params);
+		size_t b_size   = glwe_params_n_limbs(glwe_rhs->params);
+		size_t res_size = glwe_params_n_limbs(result->params);
+		gpu_vec_znx_sub_sized_device((const int64_t*)glwe_lhs->vec, a_size, (const int64_t*)glwe_rhs->vec, b_size,
+		                             (int64_t*)result->vec, res_size, result->params->nn);
 		return;
 	}
 #endif

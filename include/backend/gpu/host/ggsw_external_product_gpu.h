@@ -10,8 +10,10 @@ typedef struct glwe_ciphertext_dft GLWECiphertextDFT;
 typedef struct glwe_ct_params GLWEParams;
 typedef struct ggsw_ciphertext GGSWCiphertext;
 typedef struct ggsw_ciphertext_prepared GGSWCiphertextPrep;
+typedef struct ggsw_ct_params GGSWParams;
 typedef struct glwegadget_ciphertext GLWEGadgetCiphertext;
 typedef struct glwegadget_ciphertext_prepared GLWEGadgetCiphertextPrep;
+typedef struct glwegadget_params GLWEGadgetParams;
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,6 +64,30 @@ int64_t* pvda_ggsw_to_device(const GGSWCiphertext* ggsw);
 // the device-resident counterpart of new_glwe. Free with delete_glwe, which is
 // itself device-aware (see glwe_ciphertext.c).
 GLWECiphertext* pvda_new_glwe_device(const GLWEParams* params);
+
+// Allocate a new (raw, coefficient-domain) GLWEGadgetCiphertext whose mat lives
+// in (uninitialised) device memory — the device-resident counterpart of
+// new_glwegadget. Free with delete_glwegadget, which is itself device-aware.
+GLWEGadgetCiphertext* pvda_new_glwegadget_device(const GLWEGadgetParams* params);
+
+// Allocate a new (raw, coefficient-domain) GGSWCiphertext whose mat lives in
+// (uninitialised) device memory — the device-resident counterpart of new_ggsw.
+// Free with delete_ggsw, which is itself device-aware.
+GGSWCiphertext* pvda_new_ggsw_device(const GGSWParams* params);
+
+// Allocate a new GLWEGadgetCiphertextPrep whose mat is a device placeholder —
+// the device-resident counterpart of new_glwegadget_prep. Its only purpose
+// is to signal "prepare this on the GPU" to callers such as
+// prepare_automorphism_key (which check pvda_is_device_pointer(...->mat) to
+// decide whether to NTT-prepare on device vs DFT-prepare on host — those two
+// domains are NOT interchangeable, so this placeholder must never be read
+// before glwegadget_prepare(_gpu) replaces it). Free with
+// delete_glwegadget_prep, which is itself device-aware.
+GLWEGadgetCiphertextPrep* pvda_new_glwegadget_prep_device(const GLWEGadgetParams* params);
+
+// Same as pvda_new_glwegadget_prep_device, for GGSWCiphertextPrep / ggsw_prepare
+// (see e.g. generate_glwegad_to_ggsw_ksk). Free with delete_ggsw_prep.
+GGSWCiphertextPrep* pvda_new_ggsw_prep_device(const GGSWParams* params);
 
 // ---------------------------------------------------------------------------
 // GPU external product — all pointer arguments must be CUDA device pointers.
@@ -127,12 +153,28 @@ void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadget
 // ---------------------------------------------------------------------------
 // GPU half-product — gadget matrix already NTT'd (from glwegadget_prepare_gpu).
 //
-// d_a          : [nrows * n]           — l_tilde coef-domain int64 polys on device
-// d_glwegad_ntt: [nrows * ncols * n]   — NTT-domain gadget matrix on device
-// d_result     : [ncols * n]           — coef-domain output (NTT + VMP + INTT)
+// d_a          : [nrows * n]              — l_tilde coef-domain int64 polys on device
+// d_glwegad_ntt: [nrows * ncols_in * n]   — NTT-domain gadget matrix on device;
+//                                            ncols_in is the matrix's OWN column
+//                                            count (from the GLWEGadgetCiphertextPrep
+//                                            that was NTT-prepared), independent of
+//                                            the caller's result buffer size.
+// d_result     : [ncols_out * n]          — coef-domain output (NTT + VMP + INTT).
+//                                            Only min(ncols_in, ncols_out) columns
+//                                            are ever real VMP output; if
+//                                            ncols_out > ncols_in the remaining
+//                                            tail is zeroed (mirrors spqlios
+//                                            vmp_apply_dft's res_size vs matrix-ncols
+//                                            handling on the CPU path) — ncols_in and
+//                                            ncols_out must NEVER be conflated into a
+//                                            single parameter here, since the gadget
+//                                            matrix's own params_glwe can legitimately
+//                                            differ from the result's (e.g. an
+//                                            automorphism KSK's own precision vs the
+//                                            GLWE ciphertext being transformed).
 // ---------------------------------------------------------------------------
 void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result, size_t n,
-                                     size_t nrows, size_t ncols);
+                                     size_t nrows, size_t ncols_in, size_t ncols_out);
 
 // ---------------------------------------------------------------------------
 // GPU half-product leaving result in NTT domain (no INTT).

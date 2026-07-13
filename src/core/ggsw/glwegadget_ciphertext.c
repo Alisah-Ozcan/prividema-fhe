@@ -36,7 +36,14 @@ cleanup:
 void delete_glwegadget(GLWEGadgetCiphertext* glwegadget_ct)
 {
 	if (!glwegadget_ct) return;
+#ifdef ENABLE_CUDA
+	if (glwegadget_ct->mat && pvda_is_device_pointer(glwegadget_ct->mat))
+		pvda_gpu_free((int64_t*)glwegadget_ct->mat);
+	else
+		free(glwegadget_ct->mat);
+#else
 	free(glwegadget_ct->mat);
+#endif
 	free(glwegadget_ct);
 }
 
