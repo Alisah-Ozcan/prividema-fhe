@@ -11,10 +11,8 @@ add_library(PVDA_GPU STATIC
     common/gpu_stream.cu
     common/gpu_nttparameters.cu
     kernel/ntt_poly_mult_kernel.cu
-    kernel/normalize_kernel.cu
     kernel/vec_znx_arith_kernel.cu
     host/ntt_poly_mult_host.cu
-    host/normalize_host.cu
     host/vec_znx_arith_host.cu
     host/ggsw_external_product_gpu.cu
 )

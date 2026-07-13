@@ -90,6 +90,70 @@ GLWECiphertext* pvda_new_glwe_device(const GLWEParams* params)
 	return glwe;
 }
 
+GLWEGadgetCiphertext* pvda_new_glwegadget_device(const GLWEGadgetParams* params)
+{
+	GLWEGadgetCiphertext* glwegad = (GLWEGadgetCiphertext*)malloc(sizeof(GLWEGadgetCiphertext));
+	if (!glwegad) return nullptr;
+
+	// l_tilde * ciphertext_nb_limbs * nn == glwegadget_coef_number(params) — computed
+	// directly rather than calling glwegadget_coef_number, same extern "C" mangling
+	// reason as pvda_new_glwe_device above.
+	size_t n_elems =
+	    (size_t)params->l_tilde * (size_t)params->params_glwe->ciphertext_nb_limbs * (size_t)params->params_glwe->nn;
+
+	glwegad->params = params;
+	glwegad->mat    = (MatBiv*)pvda_gpu_alloc(n_elems);
+	pvda_gpu_zero((int64_t*)glwegad->mat, n_elems);
+	return glwegad;
+}
+
+GGSWCiphertext* pvda_new_ggsw_device(const GGSWParams* params)
+{
+	GGSWCiphertext* ggsw = (GGSWCiphertext*)malloc(sizeof(GGSWCiphertext));
+	if (!ggsw) return nullptr;
+
+	// ciphertext_nb_limbs_tilde * ciphertext_nb_limbs * nn == ggsw_coef_number(params) —
+	// computed directly, same extern "C" mangling reason as pvda_new_glwe_device above.
+	size_t n_elems = (size_t)params->ciphertext_nb_limbs_tilde * (size_t)params->params_glwe->ciphertext_nb_limbs *
+	                 (size_t)params->params_glwe->nn;
+
+	ggsw->params = params;
+	ggsw->mat    = (MatBiv*)pvda_gpu_alloc(n_elems);
+	pvda_gpu_zero((int64_t*)ggsw->mat, n_elems);
+	return ggsw;
+}
+
+GLWEGadgetCiphertextPrep* pvda_new_glwegadget_prep_device(const GLWEGadgetParams* params)
+{
+	GLWEGadgetCiphertextPrep* prep = (GLWEGadgetCiphertextPrep*)malloc(sizeof(GLWEGadgetCiphertextPrep));
+	if (!prep) return nullptr;
+
+	// Placeholder footprint — doesn't need to match the true DFT-domain
+	// size, since glwegadget_prepare_gpu always allocates a fresh buffer
+	// and replaces ->mat itself. This one only needs to exist long enough
+	// for pvda_is_device_pointer to see it (callers free it themselves
+	// right before the real prepare call, see prepare_automorphism_key).
+	size_t n_elems =
+	    (size_t)params->l_tilde * (size_t)params->params_glwe->ciphertext_nb_limbs * (size_t)params->params_glwe->nn;
+
+	prep->params = params;
+	prep->mat    = (MatBivDFT*)pvda_gpu_alloc(n_elems);
+	return prep;
+}
+
+GGSWCiphertextPrep* pvda_new_ggsw_prep_device(const GGSWParams* params)
+{
+	GGSWCiphertextPrep* prep = (GGSWCiphertextPrep*)malloc(sizeof(GGSWCiphertextPrep));
+	if (!prep) return nullptr;
+
+	size_t n_elems = (size_t)params->ciphertext_nb_limbs_tilde * (size_t)params->params_glwe->ciphertext_nb_limbs *
+	                 (size_t)params->params_glwe->nn;
+
+	prep->params = params;
+	prep->mat    = (MatBivDFT*)pvda_gpu_alloc(n_elems);
+	return prep;
+}
+
 void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_ggsw, int64_t* d_result, size_t n,
                                       size_t nrows, size_t ncols, size_t a_limbs)
 {
@@ -312,7 +376,7 @@ void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadget
 }
 
 void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result, size_t n,
-                                     size_t nrows, size_t ncols)
+                                     size_t nrows, size_t ncols_in, size_t ncols_out)
 {
 	NTTParameterGenerator& gen = NTTParameterGenerator::instance();
 	gen.initialize(n);
@@ -343,16 +407,25 @@ void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwega
 	VEC_GPU<Data64> d_a_ntt(n * nrows);
 	gpuntt::GPU_NTT((Data64s*)d_a, d_a_ntt.data(), ntt_tab, mod, cfg_fwd, (int)nrows);
 
-	// VMP: d_glwegad_ntt is already in NTT domain (from glwegadget_prepare_gpu)
-	VEC_GPU<Data64> d_c_ntt(n * ncols);
+	// VMP: d_glwegad_ntt is already in NTT domain (from glwegadget_prepare_gpu).
+	// The matrix genuinely has ncols_in columns — this must use ncols_in, not
+	// the caller's result size, regardless of how the two compare.
+	VEC_GPU<Data64> d_c_ntt(n * ncols_in);
 	int threads = 256;
-	int blocks  = ((int)(n * ncols) + threads - 1) / threads;
+	int blocks  = ((int)(n * ncols_in) + threads - 1) / threads;
 	vmp_accumulate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(
-	    d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_glwegad_ntt, mod, (int)n, (int)nrows, (int)ncols);
+	    d_c_ntt.data(), d_a_ntt.data(), (const Data64*)d_glwegad_ntt, mod, (int)n, (int)nrows, (int)ncols_in);
 	CUDA_CHECK(cudaGetLastError());
 
-	// INTT: result in coefficient domain
-	gpuntt::GPU_INTT(d_c_ntt.data(), (Data64s*)d_result, intt_tab, mod, cfg_inv, (int)ncols);
+	// INTT: only min(ncols_in, ncols_out) columns are real VMP output — never
+	// write more than ncols_out columns into d_result (that's the caller's
+	// actual buffer capacity), and zero-pad any tail beyond ncols_in if
+	// ncols_out is larger.
+	size_t common = ncols_in < ncols_out ? ncols_in : ncols_out;
+	gpuntt::GPU_INTT(d_c_ntt.data(), (Data64s*)d_result, intt_tab, mod, cfg_inv, (int)common);
+	if (ncols_out > common)
+		CUDA_CHECK(
+		    cudaMemsetAsync(d_result + common * n, 0, (ncols_out - common) * n * sizeof(int64_t), gpu_active_stream));
 	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 

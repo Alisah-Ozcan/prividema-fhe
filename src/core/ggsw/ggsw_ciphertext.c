@@ -42,7 +42,14 @@ cleanup:
 void delete_ggsw(GGSWCiphertext* ggsw)
 {
 	if (!ggsw) return;
+#ifdef ENABLE_CUDA
+	if (ggsw->mat && pvda_is_device_pointer(ggsw->mat))
+		pvda_gpu_free((int64_t*)ggsw->mat);
+	else
+		free(ggsw->mat);
+#else
 	free(ggsw->mat);
+#endif
 	free(ggsw);
 }
 

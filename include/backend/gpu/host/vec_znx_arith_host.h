@@ -32,6 +32,32 @@ void gpu_vec_znx_sub_device(const int64_t* a_dev, const int64_t* b_dev, int64_t*
 
 void gpu_vec_znx_negate_device(const int64_t* a_dev, int64_t* res_dev, size_t total);
 
+/* Sized device-pointer variants — mirror spqlios' vec_znx_add_ref /
+ * vec_znx_sub_ref semantics for operands of DIFFERING limb counts (unlike
+ * gpu_vec_znx_add_device/gpu_vec_znx_sub_device above, which require all
+ * three buffers to share the same flat element count). Each buffer is
+ * n-contiguous (stride == n): res_dev holds res_size limbs, a_dev holds
+ * a_size limbs, b_dev holds b_size limbs.
+ *
+ * Semantics (n-sized chunk i, 0-indexed):
+ *   i < min(res_size, a_size, b_size)       : res[i] = a[i] +/- b[i]
+ *   min(a_size,b_size) <= i < res_size,
+ *     bounded by max(a_size,b_size)         : res[i] = larger operand's
+ *                                              chunk (negated for sub when
+ *                                              the larger operand is b)
+ *   beyond both a_size and b_size           : res[i] = 0
+ *
+ * This is what glwe operand pairs with different params (e.g. an
+ * automorphism KSK's own precision vs. the GLWE ciphertext being
+ * transformed, as in glwe_trace_expand) require — reading/writing exactly
+ * total = res_size*n elements irrespective of a_size/b_size would silently
+ * over-read a smaller operand's buffer. */
+void gpu_vec_znx_add_sized_device(const int64_t* a_dev, size_t a_size, const int64_t* b_dev, size_t b_size,
+                                  int64_t* res_dev, size_t res_size, size_t n);
+
+void gpu_vec_znx_sub_sized_device(const int64_t* a_dev, size_t a_size, const int64_t* b_dev, size_t b_size,
+                                  int64_t* res_dev, size_t res_size, size_t n);
+
 #ifdef __cplusplus
 }
 #endif
