@@ -95,38 +95,6 @@ __device__ static inline int64_t get_digit(int64_t x, int kappa) { return (x << 
 
 __device__ static inline int64_t get_carry(int64_t x, int64_t digit, int kappa) { return (x - digit) >> kappa; }
 
-__global__ void normalize_base2k_kernel(int64_t* res, const int64_t* a, int n, int l, int64_t stride, int kappa)
-{
-	int k = blockIdx.x * blockDim.x + threadIdx.x;
-	if (k >= n) return;
-
-	int64_t cin = 0;
-
-	// Least-significant to most-significant: limb (l-1) → limb 1
-	for (int i = l - 1; i >= 1; i--)
-	{
-		int64_t x     = a[i * stride + k];
-		int64_t digit = get_digit(x, kappa);
-		int64_t carry = get_carry(x, digit, kappa);
-
-		// Add carry from the limb below, re-normalize
-		int64_t dp   = digit + cin;
-		int64_t y    = get_digit(dp, kappa);
-		int64_t cout = carry + get_carry(dp, y, kappa);
-
-		res[i * stride + k] = y;
-		cin                 = cout;
-	}
-
-	// limb 0 (most-significant): carry out is dropped
-	{
-		int64_t x     = a[k];
-		int64_t digit = get_digit(x, kappa);
-		int64_t dp    = digit + cin;
-		res[k]        = get_digit(dp, kappa);
-	}
-}
-
 __global__ void normalize_base2k_sized_kernel(int64_t* res, int res_size, int64_t res_sl, const int64_t* a, int a_size,
                                               int64_t a_sl, int n, int kappa)
 {

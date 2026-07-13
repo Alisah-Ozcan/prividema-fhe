@@ -46,6 +46,8 @@ void gpu_vec_znx_add(const int64_t* a_host, const int64_t* b_host, int64_t* res_
 	vec_znx_add_kernel<<<blocks, threads, 0, gpu_active_stream>>>(d_res.data(), d_a.data(), d_b.data(), (int)total);
 	CUDA_CHECK(cudaGetLastError());
 
+	// Host-facing: res_host must be valid the moment we return, and d_a/d_b/
+	// d_res are about to be freed by VEC_GPU's destructors — must sync here.
 	d_res.copy_to_host(res_host, total);
 	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
@@ -90,7 +92,6 @@ void gpu_vec_znx_add_device(const int64_t* a_dev, const int64_t* b_dev, int64_t*
 
 	vec_znx_add_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, a_dev, b_dev, (int)total);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_vec_znx_sub_device(const int64_t* a_dev, const int64_t* b_dev, int64_t* res_dev, size_t total)
@@ -100,7 +101,6 @@ void gpu_vec_znx_sub_device(const int64_t* a_dev, const int64_t* b_dev, int64_t*
 
 	vec_znx_sub_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, a_dev, b_dev, (int)total);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_vec_znx_negate_device(const int64_t* a_dev, int64_t* res_dev, size_t total)
@@ -110,9 +110,10 @@ void gpu_vec_znx_negate_device(const int64_t* a_dev, int64_t* res_dev, size_t to
 
 	vec_znx_negate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, a_dev, (int)total);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
+// No internal scratch (writes/copies land directly in the caller's res_dev)
+// — does not synchronize; see gpu_vec_znx_add_device above.
 void gpu_vec_znx_add_sized_device(const int64_t* a_dev, size_t a_size, const int64_t* b_dev, size_t b_size,
                                   int64_t* res_dev, size_t res_size, size_t n)
 {
@@ -137,8 +138,6 @@ void gpu_vec_znx_add_sized_device(const int64_t* a_dev, size_t a_size, const int
 	if (res_size > copy_size)
 		CUDA_CHECK(cudaMemsetAsync(res_dev + copy_size * n, 0, (res_size - copy_size) * n * sizeof(int64_t),
 		                           gpu_active_stream));
-
-	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_vec_znx_sub_sized_device(const int64_t* a_dev, size_t a_size, const int64_t* b_dev, size_t b_size,
@@ -185,8 +184,6 @@ void gpu_vec_znx_sub_sized_device(const int64_t* a_dev, size_t a_size, const int
 			CUDA_CHECK(cudaMemsetAsync(res_dev + copy_size * n, 0, (res_size - copy_size) * n * sizeof(int64_t),
 			                           gpu_active_stream));
 	}
-
-	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 void gpu_vec_znx_rotate(int64_t p, const int64_t* a_host, int64_t* res_host, size_t n, size_t res_size, int64_t res_sl,
@@ -243,8 +240,6 @@ void gpu_vec_znx_rotate_device(int64_t p, const int64_t* a_dev, int64_t* res_dev
 {
 	size_t common = min_sz(res_size, a_size);
 
-	// Scratch buffer: res_dev may alias a_dev (in-place rotate, see
-	// glwe_trace_expand), so the kernel never writes directly into res_dev.
 	VEC_GPU<int64_t> d_scratch(res_size * n);
 
 	int total   = (int)(n * res_size);
@@ -261,6 +256,8 @@ void gpu_vec_znx_rotate_device(int64_t p, const int64_t* a_dev, int64_t* res_dev
 	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
+// Same in-place-safety story as gpu_vec_znx_rotate_device above — needs its
+// own sync before the internal scratch buffer is freed.
 void gpu_vec_znx_automorphism_device(int64_t p, const int64_t* a_dev, int64_t* res_dev, size_t n, size_t res_size,
                                      int64_t res_sl, size_t a_size, int64_t a_sl)
 {
@@ -284,6 +281,39 @@ void gpu_vec_znx_automorphism_device(int64_t p, const int64_t* a_dev, int64_t* r
 	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
+void gpu_vec_znx_automorphism_device_noalias(int64_t p, const int64_t* a_dev, int64_t* res_dev, size_t n,
+                                             size_t res_size, int64_t res_sl, size_t a_size, int64_t a_sl)
+{
+	size_t common = min_sz(res_size, a_size);
+	int64_t p_inv = gpu_mod_inverse_pow2(p, 2LL * (int64_t)n);
+
+	int total   = (int)(n * res_size);
+	int threads = 256;
+	int blocks  = (total + threads - 1) / threads;
+
+	vec_znx_automorphism_kernel<<<blocks, threads, 0, gpu_active_stream>>>(
+	    res_dev, a_dev, p_inv, (int)n, (int)res_size, (int)common, res_sl, a_sl);
+	CUDA_CHECK(cudaGetLastError());
+}
+
+void gpu_vec_znx_rotate_device_scratch(int64_t p, const int64_t* a_dev, int64_t* res_dev, size_t n, size_t res_size,
+                                       int64_t res_sl, size_t a_size, int64_t a_sl, int64_t* scratch_dev)
+{
+	size_t common = min_sz(res_size, a_size);
+
+	int total   = (int)(n * res_size);
+	int threads = 256;
+	int blocks  = (total + threads - 1) / threads;
+
+	vec_znx_rotate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(scratch_dev, a_dev, p, (int)n, (int)res_size,
+	                                                                 (int)common, (int64_t)n, a_sl);
+	CUDA_CHECK(cudaGetLastError());
+
+	for (size_t i = 0; i < res_size; ++i)
+		CUDA_CHECK(cudaMemcpyAsync(res_dev + i * res_sl, scratch_dev + i * n, n * sizeof(int64_t),
+		                           cudaMemcpyDeviceToDevice, gpu_active_stream));
+}
+
 void gpu_normalize_base2k(const int64_t* a_host, int64_t* res_host, size_t n, size_t l, uint32_t kappa)
 {
 	VEC_GPU<Data64s> d_a(a_host, n * l);
@@ -292,23 +322,16 @@ void gpu_normalize_base2k(const int64_t* a_host, int64_t* res_host, size_t n, si
 	int threads = 256;
 	int blocks  = ((int)n + threads - 1) / threads;
 
-	normalize_base2k_kernel<<<blocks, threads, 0, gpu_active_stream>>>(
-	    (int64_t*)d_res.data(), (const int64_t*)d_a.data(), (int)n, (int)l, (int64_t)n, (int)kappa);
+	// a_size == res_size == l, same stride (n) for both — the sized kernel's
+	// two extra loops that handle differing limb counts simply run zero
+	// iterations in that case (see normalize_base2k_sized_kernel's doc
+	// comment), so there is no separate non-sized kernel to call here.
+	normalize_base2k_sized_kernel<<<blocks, threads, 0, gpu_active_stream>>>(
+	    (int64_t*)d_res.data(), (int)l, (int64_t)n, (const int64_t*)d_a.data(), (int)l, (int64_t)n, (int)n,
+	    (int)kappa);
 	CUDA_CHECK(cudaGetLastError());
 
 	d_res.copy_to_host(res_host, n * l);
-	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
-}
-
-void gpu_normalize_base2k_device(const int64_t* a_dev, int64_t* res_dev, size_t n, size_t l, int64_t stride,
-                                 uint32_t kappa)
-{
-	int threads = 256;
-	int blocks  = ((int)n + threads - 1) / threads;
-
-	normalize_base2k_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, a_dev, (int)n, (int)l, stride,
-	                                                                   (int)kappa);
-	CUDA_CHECK(cudaGetLastError());
 	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
@@ -321,7 +344,6 @@ void gpu_normalize_base2k_sized_device(const int64_t* a_dev, size_t a_size, int6
 	normalize_base2k_sized_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, (int)res_size, res_stride, a_dev,
 	                                                                         (int)a_size, a_stride, (int)n, (int)kappa);
 	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
 }  // extern "C"

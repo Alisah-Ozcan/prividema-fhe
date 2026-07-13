@@ -13,6 +13,7 @@
 #include "utils.h"
 
 #ifdef ENABLE_CUDA
+#include "gpu/common/gpu_stream.h"
 #include "gpu/host/ggsw_external_product_gpu.h"  // pvda_is_device_pointer
 #include "gpu/host/normalize_host.h"
 #include "gpu/host/vec_znx_arith_host.h"
@@ -43,6 +44,11 @@ int normalize_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphe
 			                                  (int64_t*)res_biv.ptr, res_biv.l, res_biv.stride, aj_biv.nn,
 			                                  (uint32_t)kappa);
 		}
+		// gpu_normalize_base2k_sized_device doesn't synchronize itself (see its
+		// doc comment) — one sync here, after the whole per-component loop
+		// instead of one per component, preserves normalize_glwe's existing
+		// synchronous contract for its many callers at a fraction of the cost.
+		pvda_gpu_stream_synchronize(pvda_gpu_stream_get_active());
 		return 0;
 	}
 #endif
@@ -79,6 +85,10 @@ void add_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphertext
 		size_t res_size = glwe_params_n_limbs(result->params);
 		gpu_vec_znx_add_sized_device((const int64_t*)glwe_lhs->vec, a_size, (const int64_t*)glwe_rhs->vec, b_size,
 		                             (int64_t*)result->vec, res_size, result->params->nn);
+		// gpu_vec_znx_add_sized_device doesn't synchronize itself (see its doc
+		// comment) — do it here to preserve add_glwe's existing synchronous
+		// contract for its many callers.
+		pvda_gpu_stream_synchronize(pvda_gpu_stream_get_active());
 		return;
 	}
 #endif
@@ -102,6 +112,10 @@ void sub_glwe(const MODULE* module, GLWECiphertext* result, const GLWECiphertext
 		size_t res_size = glwe_params_n_limbs(result->params);
 		gpu_vec_znx_sub_sized_device((const int64_t*)glwe_lhs->vec, a_size, (const int64_t*)glwe_rhs->vec, b_size,
 		                             (int64_t*)result->vec, res_size, result->params->nn);
+		// gpu_vec_znx_sub_sized_device doesn't synchronize itself (see its doc
+		// comment) — do it here to preserve sub_glwe's existing synchronous
+		// contract for its many callers.
+		pvda_gpu_stream_synchronize(pvda_gpu_stream_get_active());
 		return;
 	}
 #endif
