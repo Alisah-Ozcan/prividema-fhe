@@ -112,7 +112,13 @@ int ggsw_unprepared_external_product(const PvdaBackend* module,
 	uint64_t ncols_out = glwe_params_n_limbs(result->params);
 
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw->mat))
+	int residency = PVDA_RESIDENCY(glwe->vec, ggsw->mat, result->vec);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "ggsw_unprepared_external_product: operands mix host and GPU memory");
+		return -1;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		// glwe's own limb count — may be smaller than nrows (e.g. the GGSW selector's
 		// associated GLWE params differ from the ciphertext being multiplied); the GPU
@@ -162,7 +168,13 @@ int ggsw_external_product_to_dft(const PvdaBackend* module, GLWECiphertextDFT* r
 	size_t ncols_out = glwe_params_n_limbs(result->params);
 
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw_prepared->mat))
+	int residency = PVDA_RESIDENCY(glwe->vec, ggsw_prepared->mat, result->vec);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "ggsw_external_product_to_dft: operands mix host and GPU memory");
+		return -1;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		// ggsw_prepared->mat holds NTT-domain data (from ggsw_prepare_gpu); result stays NTT domain.
 		// glwe's own limb count may be smaller than nrows (see ggsw_unprepared_external_product) —
@@ -194,7 +206,13 @@ int ggsw_external_product(const PvdaBackend* module, GLWECiphertext* result, con
 	size_t ncols_in = glwe_params_n_limbs(ggsw_prepared->params->params_glwe);
 
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(ggsw_prepared->mat))
+	int residency = PVDA_RESIDENCY(glwe->vec, ggsw_prepared->mat, result->vec);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "ggsw_external_product: operands mix host and GPU memory");
+		return -1;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		// NTT-domain VMP then INTT: mirrors ggsw_external_product_to_dft + glwe_dft_to_coef on GPU.
 		// glwe's own limb count may be smaller than nrows (see ggsw_unprepared_external_product) —

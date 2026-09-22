@@ -92,7 +92,13 @@ void glwe_copy(GLWECiphertext* dst, const GLWECiphertext* src)
 	size_t dst_elems = glwe_coef_number(dst->params);
 
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(dst->vec) && pvda_is_device_pointer(src->vec))
+	int residency = PVDA_RESIDENCY(dst->vec, src->vec);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "glwe_copy: operands mix host and GPU memory");
+		return;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		if (dst_elems <= src_elems)
 			pvda_gpu_copy((int64_t*)dst->vec, (const int64_t*)src->vec, dst_elems);
@@ -200,7 +206,13 @@ cleanup:
 int glwe_dft_to_coef(const PvdaBackend* module, GLWECiphertext* res_ct, const GLWECiphertextDFT* glwe_dft)
 {
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwe_dft->vec))
+	int residency = PVDA_RESIDENCY(glwe_dft->vec, res_ct->vec);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "glwe_dft_to_coef: operands mix host and GPU memory");
+		return -1;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		glwe_dft_to_coef_gpu(res_ct, glwe_dft);
 		return 0;

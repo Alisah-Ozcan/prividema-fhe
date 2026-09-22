@@ -23,6 +23,28 @@ extern "C" {
 // Returns 1 if ptr resides in CUDA device memory, 0 if in ordinary host memory.
 int pvda_is_device_pointer(const void* ptr);
 
+// Where a set of operand buffers lives. The GPU dispatch of the core API
+// runs an operation on the GPU when all of its operands are device-resident
+// and on the CPU when none is; a mix is a caller error, reported instead of
+// letting either path dereference memory it cannot access.
+#define PVDA_ON_HOST          0
+#define PVDA_ON_DEVICE        1
+#define PVDA_MIXED_RESIDENCY (-1)
+
+static inline int pvda_residency(int n, const void* const* ptrs)
+{
+	int n_device = 0;
+	for (int i = 0; i < n; ++i) n_device += pvda_is_device_pointer(ptrs[i]);
+	return n_device == 0 ? PVDA_ON_HOST : n_device == n ? PVDA_ON_DEVICE : PVDA_MIXED_RESIDENCY;
+}
+
+#ifndef __cplusplus
+// PVDA_RESIDENCY(a, b, ...) == pvda_residency over the listed pointers
+#define PVDA_RESIDENCY(...)                                                                  \
+	pvda_residency((int)(sizeof((const void*[]){__VA_ARGS__}) / sizeof(const void*)), \
+	               (const void*[]){__VA_ARGS__})
+#endif
+
 // ---------------------------------------------------------------------------
 // Raw transfer primitives (element count supplied by caller)
 // ---------------------------------------------------------------------------

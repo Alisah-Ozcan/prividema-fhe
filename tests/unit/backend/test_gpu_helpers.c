@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "backend/backend.h"
+#include "core/ggsw/ggsw_arithmetic.h"
 #include "core/ggsw/ggsw_ciphertext.h"
 #include "core/ggsw/ggsw_params.h"
 #include "core/ggsw/glwegadget_arithmetic.h"
@@ -160,6 +161,73 @@ Test(gpu_helpers, automorphism_key_device_matches_cpu)
 	delete_glwe_secret_key(sk);
 	delete_glwe_secret_key_prepared(sk_prep);
 	delete_glwegadget_params(gad_params);
+	delete_glwe_params(params);
+	pvda_delete_backend(module);
+}
+
+// Operands split between host and GPU memory are rejected with an error
+// instead of letting the CPU or the GPU path dereference the other side.
+Test(gpu_helpers, mixed_operands_are_rejected)
+{
+	PvdaBackend* module          = pvda_new_spqlios_backend(NN);
+	GLWEParams* params           = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
+	GGSWParams* ggsw_params      = new_ggsw_params(params, 1, KAPPA, LIMBS);
+	GLWEGadgetParams* gad_params = new_glwegadget_params(params, KAPPA, LIMBS / 2);
+
+	GLWESecretKey* sk              = alloc_glwe_secret_key(params);
+	GLWESecretKeyPrepared* sk_prep = alloc_glwe_secret_key_prepared(params);
+	uniform_glwe_secret_key(module, sk, 1);
+	glwe_sk_prepare(module, sk_prep, sk);
+
+	GLWECiphertext* host     = new_glwe(params);
+	GLWECiphertext* host_res = new_glwe(params);
+	GLWECiphertext* dev      = pvda_glwe_upload(host);
+	GLWECiphertext* dev_res  = pvda_new_glwe_device(params);
+
+	cr_assert_eq(normalize_glwe(module, host_res, dev), -1);
+	cr_assert_eq(normalize_glwe(module, dev_res, host), -1);
+
+	GLWECiphertextDFT* dev_dft = pvda_new_glwe_dft_device(params);
+	cr_assert_eq(glwe_dft_to_coef(module, host_res, dev_dft), -1);
+
+	// Host-prepared GGSW with a device GLWE, and a device-prepared GGSW with host GLWEs
+	GGSWCiphertext* ggsw          = new_ggsw(ggsw_params);
+	GGSWCiphertextPrep* ggsw_prep = new_ggsw_prep(ggsw_params);
+	ggsw_prepare(module, ggsw_prep, ggsw);
+	cr_assert_eq(ggsw_external_product(module, dev_res, dev, ggsw_prep), -1);
+	GGSWCiphertext* ggsw_dev          = pvda_ggsw_upload(ggsw);
+	GGSWCiphertextPrep* ggsw_prep_dev = pvda_new_ggsw_prep_device(ggsw_params);
+	ggsw_prepare(module, ggsw_prep_dev, ggsw_dev);
+	cr_assert_eq(ggsw_external_product(module, host_res, host, ggsw_prep_dev), -1);
+	cr_assert_eq(ggsw_unprepared_external_product(module, host_res, dev, ggsw), -1);
+
+	// GPU automorphism key applied to host GLWEs
+	GLWEAutomorphismKey* key_gpu = pvda_new_automorphism_key_device(gad_params);
+	cr_assert_eq(compute_automorphism_key(module, key_gpu, sk_prep, 5), 0);
+	cr_assert_eq(glwegadget_automorphism(module, host_res, key_gpu, host), -1);
+
+	// Void functions log the error and leave the result untouched
+	memset(host_res->vec, 0x5a, glwe_coef_number(params) * sizeof(int64_t));
+	add_glwe(module, host_res, host, dev);
+	sub_glwe(module, host_res, dev, host);
+	glwe_copy(host_res, dev);
+	for (size_t i = 0; i < glwe_coef_number(params); ++i)
+		cr_assert_eq(host_res->vec[i], 0x5a5a5a5a5a5a5a5all, "result modified at %zu", i);
+
+	delete_automorphism_key(key_gpu);
+	delete_ggsw_prep(ggsw_prep_dev);
+	delete_ggsw(ggsw_dev);
+	delete_ggsw_prep(ggsw_prep);
+	delete_ggsw(ggsw);
+	delete_glwe_dft(dev_dft);
+	delete_glwe(dev_res);
+	delete_glwe(dev);
+	delete_glwe(host_res);
+	delete_glwe(host);
+	delete_glwe_secret_key(sk);
+	delete_glwe_secret_key_prepared(sk_prep);
+	delete_glwegadget_params(gad_params);
+	delete_ggsw_params(ggsw_params);
 	delete_glwe_params(params);
 	pvda_delete_backend(module);
 }

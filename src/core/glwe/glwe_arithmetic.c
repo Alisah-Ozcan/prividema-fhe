@@ -29,7 +29,13 @@ int normalize_glwe(const PvdaBackend* module, GLWECiphertext* result, const GLWE
 	uint64_t kappa = result->params->kappa;
 
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(result->vec))
+	int residency = PVDA_RESIDENCY(glwe->vec, result->vec);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "normalize_glwe: operands mix host and GPU memory");
+		return -1;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		// glwe and result may have different params (e.g. an automorphism
 		// KSK's own precision vs. the GLWE ciphertext being transformed, as
@@ -72,8 +78,13 @@ void add_glwe(const PvdaBackend* module, GLWECiphertext* result, const GLWECiphe
               const GLWECiphertext* glwe_rhs)
 {
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwe_lhs->vec) && pvda_is_device_pointer(glwe_rhs->vec) &&
-	    pvda_is_device_pointer(result->vec))
+	int residency = PVDA_RESIDENCY(glwe_lhs->vec, glwe_rhs->vec, result->vec);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "add_glwe: operands mix host and GPU memory");
+		return;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		// glwe_lhs/glwe_rhs/result may have differing params (e.g. an
 		// automorphism KSK's own precision vs. the GLWE ciphertext being
@@ -104,8 +115,13 @@ void sub_glwe(const PvdaBackend* module, GLWECiphertext* result, const GLWECiphe
               const GLWECiphertext* glwe_rhs)
 {
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwe_lhs->vec) && pvda_is_device_pointer(glwe_rhs->vec) &&
-	    pvda_is_device_pointer(result->vec))
+	int residency = PVDA_RESIDENCY(glwe_lhs->vec, glwe_rhs->vec, result->vec);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "sub_glwe: operands mix host and GPU memory");
+		return;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		// See add_glwe above — operands may have differing params.
 		size_t a_size   = glwe_params_n_limbs(glwe_lhs->params);

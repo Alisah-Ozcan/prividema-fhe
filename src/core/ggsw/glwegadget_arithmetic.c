@@ -38,7 +38,14 @@ int glwegadget_half_prod(const PvdaBackend* module, GLWECiphertext* result,
 	size_t ncols_out = glwe_params_n_limbs(result->params);
 
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwegadget_prep_ct->mat) && pvda_is_device_pointer(result->vec))
+	// `a` may be on either side: a host `a` is uploaded by the GPU path
+	int residency = PVDA_RESIDENCY(glwegadget_prep_ct->mat, result->vec);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "glwegadget_half_prod: operands mix host and GPU memory");
+		return -1;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		if (pvda_is_device_pointer(a->ptr))
 		{
@@ -86,8 +93,13 @@ int glwegadget_half_prod_dft_to_dft(const PvdaBackend* module, GLWECiphertextDFT
 	size_t ncols_out = glwe_params_n_limbs(result_dft->params);
 
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwegadget_prep_ct->mat) && pvda_is_device_pointer(result_dft->vec) &&
-	    pvda_is_device_pointer(a_dft))
+	int residency = PVDA_RESIDENCY(glwegadget_prep_ct->mat, result_dft->vec, a_dft);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "glwegadget_half_prod_dft_to_dft: operands mix host and GPU memory");
+		return -1;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		// a_dft is device pointer to nrows=l_tilde coef-domain int64 polys; NTT applied inside
 		gpu_glwegadget_half_prod_ntt_device((const int64_t*)a_dft, (const int64_t*)glwegadget_prep_ct->mat,
@@ -116,8 +128,13 @@ int glwegadget_half_prod_prepared_to_dft(const PvdaBackend* module, GLWECipherte
 	size_t ncols_out = glwe_params_n_limbs(result_dft->params);
 
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwegadget_prep_ct->mat) && pvda_is_device_pointer(result_dft->vec) &&
-	    pvda_is_device_pointer(a_prep))
+	int residency = PVDA_RESIDENCY(glwegadget_prep_ct->mat, result_dft->vec, a_prep);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "glwegadget_half_prod_prepared_to_dft: operands mix host and GPU memory");
+		return -1;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		// a_prep is device pointer to nrows=l_tilde coef-domain int64 polys; NTT applied inside
 		gpu_glwegadget_half_prod_ntt_device((const int64_t*)a_prep, (const int64_t*)glwegadget_prep_ct->mat,
@@ -258,8 +275,13 @@ int glwegadget_automorphism(const PvdaBackend* module, GLWECiphertext* result, c
 	// GPU branch (which accepts a device `a`) when glwegadget_prep_ct->mat is
 	// a device pointer too — otherwise it falls back to a CPU path that
 	// would dereference our device auto_tmp as host memory.
-	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(result->vec) &&
-	    pvda_is_device_pointer(auto_key->glwe_ksk->enc_s[0]->mat))
+	int residency = PVDA_RESIDENCY(glwe->vec, result->vec, auto_key->glwe_ksk->enc_s[0]->mat);
+	if (residency == PVDA_MIXED_RESIDENCY)
+	{
+		log_message(LOG_ERROR, "glwegadget_automorphism: operands mix host and GPU memory");
+		return -1;
+	}
+	if (residency == PVDA_ON_DEVICE)
 	{
 		int status_gpu      = -1;
 		int64_t* d_auto_tmp = pvda_gpu_alloc(biv_l * nn);
@@ -755,6 +777,20 @@ int glwe_trace_expand(const PvdaBackend* module, GLWECiphertext** results, int r
 	int status = -1;
 
 	uint64_t nn = glwe_ct->params->nn;
+
+#ifdef ENABLE_CUDA
+	// The results and the automorphism keys must live on the same side as glwe_ct
+	// (checked on the first key: a collection is prepared for a single backend)
+	int on_device                   = pvda_is_device_pointer(glwe_ct->vec);
+	const GLWEAutomorphismKey* key0 = glwegadget_key_collection_get_key(auto_key_collection, nn + 1);
+	int mixed                       = key0 && pvda_is_device_pointer(key0->glwe_ksk->enc_s[0]->mat) != on_device;
+	for (int i = 0; i < res_size && !mixed; ++i) mixed = pvda_is_device_pointer(results[i]->vec) != on_device;
+	if (mixed)
+	{
+		log_message(LOG_ERROR, "glwe_trace_expand: operands mix host and GPU memory");
+		return -1;
+	}
+#endif
 
 	glwe_copy(results[0], glwe_ct);
 
