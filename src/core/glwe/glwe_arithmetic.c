@@ -13,13 +13,6 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
-#ifdef ENABLE_CUDA
-#include "gpu/common/gpu_stream.h"
-#include "gpu/host/ggsw_external_product_gpu.h"  // pvda_is_device_pointer
-#include "gpu/host/normalize_host.h"
-#include "gpu/host/vec_znx_arith_host.h"
-#endif
-
 int normalize_glwe(const PvdaBackend* module, GLWECiphertext* result, const GLWECiphertext* glwe)
 {
 	int status = -1;
@@ -27,38 +20,6 @@ int normalize_glwe(const PvdaBackend* module, GLWECiphertext* result, const GLWE
 	// bivGLWE parameters
 	uint64_t k     = result->params->k;
 	uint64_t kappa = result->params->kappa;
-
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(glwe->vec, result->vec);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "normalize_glwe: operands mix host and GPU memory");
-		return -1;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		// glwe and result may have different params (e.g. an automorphism
-		// KSK's own precision vs. the GLWE ciphertext being transformed, as
-		// in glwe_trace_expand) — aj_biv.l and res_biv.l can legitimately
-		// differ, so this must go through the sized kernel (see
-		// gpu_normalize_base2k_sized_device) rather than assuming a single
-		// shared l for both buffers.
-		for (uint64_t j = 0; j <= k; j++)
-		{
-			PolyBiv aj_biv  = glwe_extract_poly_view(glwe, j);
-			PolyBiv res_biv = glwe_extract_poly_view(result, j);
-			gpu_normalize_base2k_sized_device((const int64_t*)aj_biv.ptr, aj_biv.l, aj_biv.stride,
-			                                  (int64_t*)res_biv.ptr, res_biv.l, res_biv.stride, aj_biv.nn,
-			                                  (uint32_t)kappa);
-		}
-		// gpu_normalize_base2k_sized_device doesn't synchronize itself (see its
-		// doc comment) — one sync here, after the whole per-component loop
-		// instead of one per component, preserves normalize_glwe's existing
-		// synchronous contract for its many callers at a fraction of the cost.
-		pvda_gpu_stream_synchronize(pvda_gpu_stream_get_active());
-		return 0;
-	}
-#endif
 
 	for (uint64_t j = 0; j <= k; j++)
 	{
@@ -77,34 +38,6 @@ cleanup:
 void add_glwe(const PvdaBackend* module, GLWECiphertext* result, const GLWECiphertext* glwe_lhs,
               const GLWECiphertext* glwe_rhs)
 {
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(glwe_lhs->vec, glwe_rhs->vec, result->vec);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "add_glwe: operands mix host and GPU memory");
-		return;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		// glwe_lhs/glwe_rhs/result may have differing params (e.g. an
-		// automorphism KSK's own precision vs. the GLWE ciphertext being
-		// transformed, as in glwe_trace_expand) — must not assume they all
-		// share glwe_coef_number(result->params). Mirrors the CPU path
-		// below (glwe_flattened_biv + pvda_vec_znx_add's independent
-		// res/a/b sizes) via gpu_vec_znx_add_sized_device.
-		size_t a_size   = glwe_params_n_limbs(glwe_lhs->params);
-		size_t b_size   = glwe_params_n_limbs(glwe_rhs->params);
-		size_t res_size = glwe_params_n_limbs(result->params);
-		gpu_vec_znx_add_sized_device((const int64_t*)glwe_lhs->vec, a_size, (const int64_t*)glwe_rhs->vec, b_size,
-		                             (int64_t*)result->vec, res_size, result->params->nn);
-		// gpu_vec_znx_add_sized_device doesn't synchronize itself (see its doc
-		// comment) — do it here to preserve add_glwe's existing synchronous
-		// contract for its many callers.
-		pvda_gpu_stream_synchronize(pvda_gpu_stream_get_active());
-		return;
-	}
-#endif
-
 	PolyBiv lhs_flattened = glwe_flattened_biv(glwe_lhs);
 	PolyBiv rhs_flattened = glwe_flattened_biv(glwe_rhs);
 	PolyBiv res_flattened = glwe_flattened_biv(result);
@@ -114,29 +47,6 @@ void add_glwe(const PvdaBackend* module, GLWECiphertext* result, const GLWECiphe
 void sub_glwe(const PvdaBackend* module, GLWECiphertext* result, const GLWECiphertext* glwe_lhs,
               const GLWECiphertext* glwe_rhs)
 {
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(glwe_lhs->vec, glwe_rhs->vec, result->vec);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "sub_glwe: operands mix host and GPU memory");
-		return;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		// See add_glwe above — operands may have differing params.
-		size_t a_size   = glwe_params_n_limbs(glwe_lhs->params);
-		size_t b_size   = glwe_params_n_limbs(glwe_rhs->params);
-		size_t res_size = glwe_params_n_limbs(result->params);
-		gpu_vec_znx_sub_sized_device((const int64_t*)glwe_lhs->vec, a_size, (const int64_t*)glwe_rhs->vec, b_size,
-		                             (int64_t*)result->vec, res_size, result->params->nn);
-		// gpu_vec_znx_sub_sized_device doesn't synchronize itself (see its doc
-		// comment) — do it here to preserve sub_glwe's existing synchronous
-		// contract for its many callers.
-		pvda_gpu_stream_synchronize(pvda_gpu_stream_get_active());
-		return;
-	}
-#endif
-
 	PolyBiv lhs_flattened = glwe_flattened_biv(glwe_lhs);
 	PolyBiv rhs_flattened = glwe_flattened_biv(glwe_rhs);
 	PolyBiv res_flattened = glwe_flattened_biv(result);

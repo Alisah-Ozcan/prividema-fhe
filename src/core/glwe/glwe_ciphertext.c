@@ -263,20 +263,6 @@ cleanup:
 
 int glwe_dft_to_coef(const PvdaBackend* module, GLWECiphertext* res_ct, const GLWECiphertextDFT* glwe_dft)
 {
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(glwe_dft->vec, res_ct->vec);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "glwe_dft_to_coef: operands mix host and GPU memory");
-		return -1;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		glwe_dft_to_coef_gpu(res_ct, glwe_dft);
-		return 0;
-	}
-#endif
-
 	int status             = -1;
 	PolyBiv glwe_flattened = glwe_flattened_biv(res_ct);
 
