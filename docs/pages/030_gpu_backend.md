@@ -71,6 +71,8 @@ the results are then moved to the GPU with the `*_clone_on` functions.
 
 ### Rules
 
+- **Use a CUDA backend with GPU objects.** A spqlios backend treats every buffer as host memory,
+  so GPU objects passed to it are not detected.
 - **Keep the operands of an operation on one side.** An operation whose operands mix host and
   GPU memory logs an error and returns -1 instead of running (void functions leave their
   result untouched). The half-products accept their `a` operand on either side.
@@ -83,6 +85,27 @@ the results are then moved to the GPU with the `*_clone_on` functions.
   `pvda_vmp_prepare_vec` / `biv_coefs_to_prep`): the GPU DFT domain is an NTT domain, so
   compute them on the backend that consumes them. The OnionPIR GPU example prepares its
   database columns on the GPU once, as the CPU example does on the CPU.
+
+## How it works
+
+The core (GLWE, GLWEGadget, GGSW) and scheme code contains no GPU code: its algorithms are
+written once against the backend's virtual table of polynomial operations (`pvda_vec_znx_add`,
+`pvda_vmp_apply_dft`, `pvda_vec_znx_automorphism`, ...). The CUDA backend implements that table
+for GPU operands (`src/backend/impls/cuda_alias.c`, `src/backend/gpu/host/vtable_ops_host.cu`)
+and forwards host operands to its embedded spqlios table. The GPU DFT domain is the NTT domain
+modulo a 64-bit prime.
+
+Temporaries of an operation are allocated next to its operands (`pvda_alloc_like`,
+`new_glwe_like`), and objects are allocated, freed and copied through the backend's memory
+functions (`pvda_alloc_on`, `pvda_free_any`, `pvda_memcpy_any`), so the same core code runs on
+host and GPU data. Preparing a GGSW or GLWEGadget whose raw or prepared matrix is in GPU memory
+prepares it on the GPU (`pvda_vmp_prepare_contiguous_placed`).
+
+GPU operations are asynchronous: they are queued on the active stream and results become
+visible to the host through the downloading functions (`glwe_copy_to_host`, ...), which wait
+for them. Call `pvda_gpu_device_synchronize()` before reading a wall-clock timer around GPU
+work. Independent work can be spread over streams with `pvda_gpu_stream_push` /
+`pvda_gpu_stream_pop` (see `examples/example_PIR_gpu_stream.c`).
 
 ## GPU memory
 
