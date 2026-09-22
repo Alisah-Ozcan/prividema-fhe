@@ -117,6 +117,49 @@ GGSWCiphertext* pvda_new_ggsw_device(const GGSWParams* params)
 	return ggsw;
 }
 
+GLWECiphertext* pvda_glwe_upload(const GLWECiphertext* host_glwe)
+{
+	GLWECiphertext* glwe = (GLWECiphertext*)malloc(sizeof(GLWECiphertext));
+	if (!glwe) return nullptr;
+	glwe->params = host_glwe->params;
+	glwe->vec    = (VecBiv*)pvda_glwe_to_device(host_glwe);
+	return glwe;
+}
+
+void pvda_glwe_download(GLWECiphertext* host_dst, const GLWECiphertext* device_glwe)
+{
+	pvda_glwe_from_device(host_dst, (const int64_t*)device_glwe->vec);
+}
+
+GGSWCiphertext* pvda_ggsw_upload(const GGSWCiphertext* host_ggsw)
+{
+	GGSWCiphertext* ggsw = (GGSWCiphertext*)malloc(sizeof(GGSWCiphertext));
+	if (!ggsw) return nullptr;
+	ggsw->params = host_ggsw->params;
+	ggsw->mat    = (MatBiv*)pvda_ggsw_to_device(host_ggsw);
+	return ggsw;
+}
+
+GLWEGadgetCiphertext* pvda_glwegadget_upload(const GLWEGadgetCiphertext* host_glwegad)
+{
+	GLWEGadgetCiphertext* glwegad = (GLWEGadgetCiphertext*)malloc(sizeof(GLWEGadgetCiphertext));
+	if (!glwegad) return nullptr;
+	glwegad->params = host_glwegad->params;
+	glwegad->mat    = (MatBiv*)pvda_glwegadget_to_device(host_glwegad);
+	return glwegad;
+}
+
+GLWECiphertextDFT* pvda_new_glwe_dft_device(const GLWEParams* params)
+{
+	GLWECiphertextDFT* glwe_dft = (GLWECiphertextDFT*)malloc(sizeof(GLWECiphertextDFT));
+	if (!glwe_dft) return nullptr;
+	// NTT domain: one int64 residue per coefficient (see glwe_dft_to_coef_gpu)
+	size_t n_elems   = (size_t)params->ciphertext_nb_limbs * (size_t)params->nn;
+	glwe_dft->params = params;
+	glwe_dft->vec    = (VecBivDFT*)pvda_gpu_alloc(n_elems);
+	return glwe_dft;
+}
+
 GLWEGadgetCiphertextPrep* pvda_new_glwegadget_prep_device(const GLWEGadgetParams* params)
 {
 	GLWEGadgetCiphertextPrep* prep = (GLWEGadgetCiphertextPrep*)malloc(sizeof(GLWEGadgetCiphertextPrep));

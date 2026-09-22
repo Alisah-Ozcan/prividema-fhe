@@ -14,6 +14,7 @@ typedef struct ggsw_ct_params GGSWParams;
 typedef struct glwegadget_ciphertext GLWEGadgetCiphertext;
 typedef struct glwegadget_ciphertext_prepared GLWEGadgetCiphertextPrep;
 typedef struct glwegadget_params GLWEGadgetParams;
+typedef struct glwe_automorphism_keyswitching_key_t GLWEAutomorphismKey;
 
 #ifdef __cplusplus
 extern "C" {
@@ -88,6 +89,37 @@ GLWEGadgetCiphertextPrep* pvda_new_glwegadget_prep_device(const GLWEGadgetParams
 // Same as pvda_new_glwegadget_prep_device, for GGSWCiphertextPrep / ggsw_prepare
 // (see e.g. generate_glwegad_to_ggsw_ksk). Free with delete_ggsw_prep.
 GGSWCiphertextPrep* pvda_new_ggsw_prep_device(const GGSWParams* params);
+
+// ---------------------------------------------------------------------------
+// Device-resident objects from/to host objects. Every object returned here is
+// freed with the regular delete_* function (they are all device-aware), and
+// can be passed to the regular API, which then runs on the GPU.
+// ---------------------------------------------------------------------------
+
+// New device GLWECiphertext holding a copy of host_glwe (same params).
+GLWECiphertext* pvda_glwe_upload(const GLWECiphertext* host_glwe);
+
+// Copies device_glwe into the existing host GLWECiphertext host_dst. Both
+// must have the same params. Returns once the data is on the host.
+void pvda_glwe_download(GLWECiphertext* host_dst, const GLWECiphertext* device_glwe);
+
+// New device GGSWCiphertext holding a copy of the raw (unprepared) host_ggsw.
+GGSWCiphertext* pvda_ggsw_upload(const GGSWCiphertext* host_ggsw);
+
+// New device GLWEGadgetCiphertext holding a copy of the raw host_glwegad.
+GLWEGadgetCiphertext* pvda_glwegadget_upload(const GLWEGadgetCiphertext* host_glwegad);
+
+// New GLWECiphertextDFT in the GPU (NTT) domain, the device counterpart of
+// new_glwe_dft, e.g. for ggsw_external_product_to_dft or
+// glwegadget_half_prod_prepared_to_dft. Free with delete_glwe_dft.
+GLWECiphertextDFT* pvda_new_glwe_dft_device(const GLWEParams* params);
+
+// New automorphism key whose gadgets are prepared on the GPU: pass it to
+// compute_automorphism_key, then use it with device GLWEs in
+// glwegadget_automorphism / glwe_trace_expand. The GPU (NTT) and CPU (FFT)
+// prepared forms are not interchangeable, so a key must be created for the
+// backend it will be used with. Free with delete_automorphism_key.
+GLWEAutomorphismKey* pvda_new_automorphism_key_device(GLWEGadgetParams* params);
 
 // ---------------------------------------------------------------------------
 // GPU external product — all pointer arguments must be CUDA device pointers.

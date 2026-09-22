@@ -163,6 +163,14 @@ cleanup:
 void delete_glwe_dft(GLWECiphertextDFT* glwe)
 {
 	if (!glwe) return;
+#ifdef ENABLE_CUDA
+	if (glwe->vec && pvda_is_device_pointer(glwe->vec))
+	{
+		pvda_gpu_free((int64_t*)glwe->vec);
+		free(glwe);
+		return;
+	}
+#endif
 	free(glwe->vec);
 	free(glwe);
 }

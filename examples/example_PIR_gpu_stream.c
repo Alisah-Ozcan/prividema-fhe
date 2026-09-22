@@ -173,10 +173,8 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	// sampling has no GPU path) — upload them once so every downstream op
 	// (glwegadget_automorphism, glwe_rotate_flattened_inplace, add_glwe, ...)
 	// sees a device-resident source and takes its GPU branch.
-	int64_t* d_row_query_vec     = pvda_glwe_to_device(row_query);
-	GLWECiphertext row_query_dev = {.params = row_query->params, .vec = (VecBiv*)d_row_query_vec};
-	int64_t* d_col_query_vec     = pvda_glwe_to_device(col_query);
-	GLWECiphertext col_query_dev = {.params = col_query->params, .vec = (VecBiv*)d_col_query_vec};
+	GLWECiphertext* row_query_dev = pvda_glwe_upload(row_query);
+	GLWECiphertext* col_query_dev = pvda_glwe_upload(col_query);
 
 	// --- Row query expansion — now fully on the GPU: row_trace_unprep is a
 	// device buffer, packed_glwegadget_trace_expand's automorphism/rotation
@@ -193,7 +191,7 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 		gadgets[r].mat    = glwegadget_extract_bivglwe(row_trace_unprep, 1 + r * query1_params->l_tilde);
 		gptrs[r]          = &gadgets[r];
 	}
-	packed_glwegadget_trace_expand(module, gptrs, MATRIX_ROWS, L_TILDE_Q1, &row_query_dev, ksks);
+	packed_glwegadget_trace_expand(module, gptrs, MATRIX_ROWS, L_TILDE_Q1, row_query_dev, ksks);
 
 	GLWEGadgetCiphertextPrep* glwegad_trace = new_glwegadget_prep(mega_params);
 	glwegadget_prepare(module, glwegad_trace, row_trace_unprep);
@@ -210,14 +208,11 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	clock_gettime(CLOCK_REALTIME, &server_start);
 
 	void* streams[NUM_STREAMS];
-	GLWECiphertextDFT tmp_glwe_dft_gpu[NUM_STREAMS];
+	GLWECiphertextDFT* tmp_glwe_dft_gpu[NUM_STREAMS];
 	for (int s = 0; s < NUM_STREAMS; ++s)
 	{
 		streams[s] = pvda_gpu_stream_create();
-		tmp_glwe_dft_gpu[s] =
-		    (GLWECiphertextDFT){.params = aggregation_params,
-		                        .vec    = (VecBivDFT*)pvda_gpu_alloc((size_t)glwe_params_n_limbs(aggregation_params) *
-		                                                             (size_t)aggregation_params->nn)};
+		tmp_glwe_dft_gpu[s] = pvda_new_glwe_dft_device(aggregation_params);
 	}
 
 	for (int64_t c = 0; c < MATRIX_COLS; ++c)
@@ -225,16 +220,16 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 		int slot = (int)(c % NUM_STREAMS);
 
 		pvda_gpu_stream_push(streams[slot]);
-		glwegadget_half_prod_prepared_to_dft(module, &tmp_glwe_dft_gpu[slot], glwegad_trace,
+		glwegadget_half_prod_prepared_to_dft(module, tmp_glwe_dft_gpu[slot], glwegad_trace,
 		                                     (const PolyBivPrep*)onionpir_get_prepared_column_gpu(c));
-		glwe_dft_to_coef(module, glwe_tree_first_level[c], &tmp_glwe_dft_gpu[slot]);
+		glwe_dft_to_coef(module, glwe_tree_first_level[c], tmp_glwe_dft_gpu[slot]);
 		normalize_glwe(module, glwe_tree_first_level[c], glwe_tree_first_level[c]);
 		pvda_gpu_stream_pop();
 	}
 
 	for (int s = 0; s < NUM_STREAMS; ++s)
 	{
-		pvda_gpu_free((int64_t*)tmp_glwe_dft_gpu[s].vec);
+		delete_glwe_dft(tmp_glwe_dft_gpu[s]);
 		pvda_gpu_stream_destroy(streams[s]);
 	}
 
@@ -255,7 +250,7 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	for (int r = 0; r < LOG2_COLS; ++r) ggsw_trace_raw[r] = pvda_new_ggsw_device(ggsw_ksk_params);
 
 	packed_glwegadget_trace_expand_ggsw(module, ggsw_trace_raw, LOG2_COLS, ggsw_params_l_tilde_a(ggsw_ksk_params),
-	                                    &col_query_dev, ksks, ggsw_ksks);
+	                                    col_query_dev, ksks, ggsw_ksks);
 
 	GGSWCiphertextPrep* ggsw_trace[LOG2_COLS] = {0};
 	for (int r = 0; r < LOG2_COLS; ++r)
@@ -265,12 +260,12 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 		delete_ggsw(ggsw_trace_raw[r]);
 	}
 
-	pvda_gpu_free(d_row_query_vec);
-	pvda_gpu_free(d_col_query_vec);
+	delete_glwe(row_query_dev);
+	delete_glwe(col_query_dev);
 
 	// --- CMux selection tree — entirely on the GPU: leaves, selectors and the
 	// result are all device-resident, and hebits_cmux_tree allocates its own
-	// intermediate nodes on the device too (see hebits_cmux_tree_new_node).
+	// intermediate nodes on the device too (see hebits_new_glwe in hebits.c).
 	// delete_src=0: the leaves are slices of the single d_glwe_tree_storage
 	// allocation (see above), not independent pvda_new_glwe_device buffers,
 	// so hebits_cmux_tree must not delete_glwe() them one by one (that would
@@ -280,7 +275,7 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	hebits_cmux_tree(module, res_gpu, (const GLWECiphertext**)glwe_tree_first_level, MATRIX_COLS,
 	               (const GGSWCiphertextPrep**)ggsw_trace, LOG2_COLS, 0);
 
-	pvda_glwe_from_device(res, res_gpu->vec);
+	pvda_glwe_download(res, res_gpu);
 	delete_glwe(res_gpu);
 
 	// Single free for the whole CMux-leaf block (glwe_tree_storage[] itself
@@ -293,29 +288,10 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	return 0;
 }
 
-// Swaps every enc_s[i] of a freshly-allocated (host-prepared-by-default) KSK
-// for a device Prep placeholder, so the compute_automorphism_key call right
-// after this NTT-prepares it on the GPU (see glwegadget_arithmetic.c's
-// #ifdef ENABLE_CUDA branch, gated on pvda_is_device_pointer(enc_s[i]->mat)).
-// Must run BEFORE compute_automorphism_key — CPU glwegadget_prepare produces
-// a spqlios DFT-domain (double) matrix, GPU glwegadget_prepare_gpu an
-// NTT-domain (int64 residue) one; same footprint, incompatible content, so
-// there is no way to convert a CPU-prepared KSK into a GPU one after the
-// fact other than re-running preparation from the raw ciphertext.
-static void make_automorphism_ksk_device(GLWEAutomorphismKey* ksk)
-{
-	uint64_t k = ksk->glwe_ksk->params->params_glwe->k;
-	for (uint64_t i = 0; i < k; ++i)
-	{
-		delete_glwegadget_prep(ksk->glwe_ksk->enc_s[i]);
-		ksk->glwe_ksk->enc_s[i] = pvda_new_glwegadget_prep_device(ksk->glwe_ksk->params);
-	}
-}
-
 // Setup phase for the client in the protocol: secret and evaluation key
 // generation. Same protocol as example_PIR.c's client phase0 — encryption
 // itself is RNG-based and stays on the CPU — but the KSKs are NTT-prepared
-// directly on the GPU (see make_automorphism_ksk_device above), a one-time
+// directly on the GPU (see pvda_new_automorphism_key_device), a one-time
 // setup cost, so every later per-query dispatch (glwegadget_automorphism,
 // glwegadget_half_prod, ggsw_external_product) sees device-resident KSK
 // material and takes its GPU branch.
@@ -342,8 +318,7 @@ int onionpir_client_phase0(PvdaBackend* module, GLWESecretKeyPrepared** sk_prep_
 	for (uint64_t i = 1; (1ULL << i) <= NBASE; ++i)
 	{
 		int64_t p                = (int64_t)NBASE / (1LL << (i - 1)) + 1;
-		GLWEAutomorphismKey* ksk = new_automorphism_key(auto_ksk_params);
-		make_automorphism_ksk_device(ksk);
+		GLWEAutomorphismKey* ksk = pvda_new_automorphism_key_device(auto_ksk_params);
 		compute_automorphism_key(module, ksk, sk_prep, (int)p);
 		glwegadget_key_collection_put_key(ksks, ksk, p);
 	}
