@@ -1,5 +1,8 @@
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <map>
+#include <mutex>
 #include <vector>
 
 #include "gpu/common/gpu_common.h"
@@ -37,6 +40,50 @@ cudaMemPool_t default_mempool()
 }
 }  // namespace
 
+namespace {
+// The GPU blocks handed out by pvda_device_alloc_bytes, so that the library can tell its GPU
+// memory apart from host memory without the CUDA runtime (pvda_gpu_owns): a program that never
+// allocates GPU memory never initializes CUDA. Heap-allocated and never destroyed, as blocks
+// may be freed by static destructors at exit.
+struct BlockRegistry
+{
+	std::mutex mutex;
+	std::map<uintptr_t, size_t> blocks;  // start -> size
+};
+BlockRegistry& block_registry()
+{
+	static BlockRegistry* registry = new BlockRegistry;
+	return *registry;
+}
+std::atomic<size_t> live_blocks{0};
+
+void register_block(void* ptr, size_t bytes)
+{
+	BlockRegistry& r = block_registry();
+	std::lock_guard<std::mutex> lock(r.mutex);
+	r.blocks[(uintptr_t)ptr] = bytes ? bytes : 1;
+	live_blocks.fetch_add(1, std::memory_order_relaxed);
+}
+
+void unregister_block(void* ptr)
+{
+	BlockRegistry& r = block_registry();
+	std::lock_guard<std::mutex> lock(r.mutex);
+	if (r.blocks.erase((uintptr_t)ptr)) live_blocks.fetch_sub(1, std::memory_order_relaxed);
+}
+}  // namespace
+
+extern "C" int pvda_gpu_owns(const void* ptr)
+{
+	if (!ptr || live_blocks.load(std::memory_order_relaxed) == 0) return 0;
+	BlockRegistry& r = block_registry();
+	std::lock_guard<std::mutex> lock(r.mutex);
+	auto it = r.blocks.upper_bound((uintptr_t)ptr);
+	if (it == r.blocks.begin()) return 0;
+	--it;
+	return (uintptr_t)ptr < it->first + it->second;
+}
+
 void* pvda_device_alloc_bytes(size_t bytes)
 {
 	(void)default_mempool();  // configures the pool's release threshold on first use
@@ -50,6 +97,7 @@ void* pvda_device_alloc_bytes(size_t bytes)
 		err = cudaMallocAsync(&ptr, bytes, gpu_active_stream);
 	}
 	CUDA_CHECK(err);
+	register_block(ptr, bytes);
 	return ptr;
 }
 
@@ -61,7 +109,9 @@ void* pvda_device_alloc_bytes(size_t bytes)
 // after the CUDA runtime has already shut down at program exit.
 void pvda_device_free_bytes(void* ptr)
 {
-	if (ptr) (void)cudaFreeAsync(ptr, gpu_active_stream);
+	if (!ptr) return;
+	unregister_block(ptr);
+	(void)cudaFreeAsync(ptr, gpu_active_stream);
 }
 
 extern "C" {

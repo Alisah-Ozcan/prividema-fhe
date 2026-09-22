@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "gpu/common/gpu_stream.h"
 #include "gpu/host/ggsw_external_product_gpu.h"
 #include "gpu/host/normalize_host.h"
 #include "gpu/host/vec_znx_rotate_automorphism_host.h"
@@ -287,4 +288,200 @@ void pvda_fill_cuda(struct pvda_virtual_table* vt)
 	vt->pvda_vec_znx_rotate            = cuda_vec_znx_rotate;
 	vt->pvda_vmp_prepare_vec           = cuda_vmp_prepare_vec;
 	// pvda_module_extract_nn, the RNG and number-theory entries stay the spqlios/CPU ones
+}
+
+// --- spqlios backend in a CUDA build: reject GPU operands instead of dereferencing them ---
+
+static int any_gpu_owned(int n, const void* const* ptrs)
+{
+	for (int i = 0; i < n; ++i)
+		if (pvda_gpu_owns(ptrs[i])) return 1;
+	return 0;
+}
+
+#define GUARD(op, ...)                                                                               \
+	do                                                                                               \
+	{                                                                                                \
+		if (any_gpu_owned((int)(sizeof((const void*[]){__VA_ARGS__}) / sizeof(const void*)),         \
+		                  (const void*[]){__VA_ARGS__}))                                             \
+		{                                                                                            \
+			log_message(LOG_ERROR, op ": GPU operands need a CUDA backend (pvda_new_cuda_backend)"); \
+			return -1;                                                                               \
+		}                                                                                            \
+	} while (0)
+
+static void guard_delete_vec_znx_dft(const PvdaBackend* backend, double* res)
+{
+	if (pvda_gpu_owns(res))
+		pvda_gpu_free((int64_t*)res);
+	else
+		backend->host_vt.pvda_delete_vec_znx_dft(backend, res);
+}
+
+static void guard_delete_vec_znx_big(const PvdaBackend* backend, int64_t* res)
+{
+	if (pvda_gpu_owns(res))
+		pvda_gpu_free(res);
+	else
+		backend->host_vt.pvda_delete_vec_znx_big(backend, res);
+}
+
+static void guard_delete_svp_ppol(const PvdaBackend* backend, PolyUnivDFT* res)
+{
+	if (pvda_gpu_owns(res))
+		pvda_gpu_free((int64_t*)res);
+	else
+		backend->host_vt.pvda_delete_svp_ppol(backend, res);
+}
+
+static void guard_delete_vmp_pmat(const PvdaBackend* backend, MatBivDFT* pmat)
+{
+	if (pvda_gpu_owns(pmat))
+		pvda_gpu_free((int64_t*)pmat);
+	else
+		backend->host_vt.pvda_delete_vmp_pmat(backend, pmat);
+}
+
+static int guard_vec_znx_dft(const PvdaBackend* backend, PolyBivDFT* res, uint64_t res_size, const PolyBiv* a)
+{
+	GUARD("pvda_vec_znx_dft", res, a->ptr);
+	return backend->host_vt.pvda_vec_znx_dft(backend, res, res_size, a);
+}
+
+static int guard_vec_znx_idft(const PvdaBackend* backend, PolyBiv* res, const PolyBivDFT* a_dft, uint64_t a_size)
+{
+	GUARD("pvda_vec_znx_idft", res->ptr, a_dft);
+	return backend->host_vt.pvda_vec_znx_idft(backend, res, a_dft, a_size);
+}
+
+static int guard_svp_prepare(const PvdaBackend* backend, PolyUnivDFT* prepared_pol, const int64_t* pol)
+{
+	GUARD("pvda_svp_prepare", prepared_pol, pol);
+	return backend->host_vt.pvda_svp_prepare(backend, prepared_pol, pol);
+}
+
+static int guard_svp_apply_dft(const PvdaBackend* backend, const PolyBivDFT* res, uint64_t res_size,
+                               const PolyUnivDFT* prepared_pol, const PolyBiv* a)
+{
+	GUARD("pvda_svp_apply_dft", res, prepared_pol, a->ptr);
+	return backend->host_vt.pvda_svp_apply_dft(backend, res, res_size, prepared_pol, a);
+}
+
+static int guard_svp_apply_dft_to_dft(const PvdaBackend* backend, const PolyBivDFT* res, uint64_t res_size,
+                                      const PolyUnivDFT* ppol, const PolyBivDFT* a, uint64_t a_size)
+{
+	GUARD("pvda_svp_apply_dft_to_dft", res, ppol, a);
+	return backend->host_vt.pvda_svp_apply_dft_to_dft(backend, res, res_size, ppol, a, a_size);
+}
+
+static int guard_vmp_prepare_contiguous(const PvdaBackend* backend, MatBivDFT* pmat, const int64_t* mat, uint64_t nrows,
+                                        uint64_t ncols)
+{
+	GUARD("pvda_vmp_prepare_contiguous", pmat, mat);
+	return backend->host_vt.pvda_vmp_prepare_contiguous(backend, pmat, mat, nrows, ncols);
+}
+
+static int guard_vmp_apply_dft(const PvdaBackend* backend, PolyBivDFT* res, uint64_t res_size, const PolyBiv* a,
+                               const MatBivDFT* pmat, uint64_t nrows, uint64_t ncols)
+{
+	GUARD("pvda_vmp_apply_dft", res, a->ptr, pmat);
+	return backend->host_vt.pvda_vmp_apply_dft(backend, res, res_size, a, pmat, nrows, ncols);
+}
+
+static int guard_vmp_apply_dft_to_dft(const PvdaBackend* backend, VecBivDFT* res, const uint64_t res_size,
+                                      const VecBivDFT* a_dft, uint64_t a_size, const MatBivDFT* pmat,
+                                      const uint64_t nrows, const uint64_t ncols)
+{
+	GUARD("pvda_vmp_apply_dft_to_dft", res, a_dft, pmat);
+	return backend->host_vt.pvda_vmp_apply_dft_to_dft(backend, res, res_size, a_dft, a_size, pmat, nrows, ncols);
+}
+
+static int guard_vmp_apply_prepared_to_dft(const PvdaBackend* backend, VecBivDFT* res, const uint64_t res_size,
+                                           const VecBivDFT* a_prep, uint64_t a_size, const MatBivDFT* pmat,
+                                           const uint64_t nrows, const uint64_t ncols)
+{
+	GUARD("pvda_vmp_apply_prepared_to_dft", res, a_prep, pmat);
+	return backend->host_vt.pvda_vmp_apply_prepared_to_dft(backend, res, res_size, a_prep, a_size, pmat, nrows, ncols);
+}
+
+static int guard_vmp_prepare_vec(const PvdaBackend* backend, PolyBivPrep* pvec, uint64_t nrows, const PolyBiv* a)
+{
+	GUARD("pvda_vmp_prepare_vec", pvec, a->ptr);
+	return backend->host_vt.pvda_vmp_prepare_vec(backend, pvec, nrows, a);
+}
+
+static int guard_vec_znx_normalize_base2k(const PvdaBackend* backend, uint64_t log2_base2k, PolyBiv* res,
+                                          const PolyBiv* a)
+{
+	GUARD("pvda_vec_znx_normalize_base2k", res->ptr, a->ptr);
+	return backend->host_vt.pvda_vec_znx_normalize_base2k(backend, log2_base2k, res, a);
+}
+
+static int guard_znx_small_product(const PvdaBackend* backend, PolyUniv* res, const PolyUniv* a, const PolyUniv* b)
+{
+	GUARD("pvda_znx_small_product", res, a, b);
+	return backend->host_vt.pvda_znx_small_product(backend, res, a, b);
+}
+
+static int guard_vec_znx_negate(const PvdaBackend* backend, PolyBiv* res, const PolyBiv* a)
+{
+	GUARD("pvda_vec_znx_negate", res->ptr, a->ptr);
+	return backend->host_vt.pvda_vec_znx_negate(backend, res, a);
+}
+
+static int guard_vec_znx_add(const PvdaBackend* backend, PolyBiv* res, const PolyBiv* a, const PolyBiv* b)
+{
+	GUARD("pvda_vec_znx_add", res->ptr, a->ptr, b->ptr);
+	return backend->host_vt.pvda_vec_znx_add(backend, res, a, b);
+}
+
+static int guard_vec_znx_sub(const PvdaBackend* backend, PolyBiv* res, const PolyBiv* a, const PolyBiv* b)
+{
+	GUARD("pvda_vec_znx_sub", res->ptr, a->ptr, b->ptr);
+	return backend->host_vt.pvda_vec_znx_sub(backend, res, a, b);
+}
+
+static int guard_znx_automorphism(const PvdaBackend* backend, const int64_t p, PolyUniv* res, const PolyUniv* a)
+{
+	GUARD("pvda_znx_automorphism", res, a);
+	return backend->host_vt.pvda_znx_automorphism(backend, p, res, a);
+}
+
+static int guard_vec_znx_automorphism(const PvdaBackend* backend, const int64_t p, PolyBiv* res, const PolyBiv* a)
+{
+	GUARD("pvda_vec_znx_automorphism", res->ptr, a->ptr);
+	return backend->host_vt.pvda_vec_znx_automorphism(backend, p, res, a);
+}
+
+static int guard_vec_znx_rotate(const PvdaBackend* backend, const int64_t p, PolyBiv* res, const PolyBiv* a)
+{
+	GUARD("pvda_vec_znx_rotate", res->ptr, a->ptr);
+	return backend->host_vt.pvda_vec_znx_rotate(backend, p, res, a);
+}
+
+void pvda_fill_spqlios_gpu_guard(struct pvda_virtual_table* vt)
+{
+	vt->pvda_vec_znx_dft               = guard_vec_znx_dft;
+	vt->pvda_delete_vec_znx_dft        = guard_delete_vec_znx_dft;
+	vt->pvda_vec_znx_idft              = guard_vec_znx_idft;
+	vt->pvda_delete_vec_znx_big        = guard_delete_vec_znx_big;
+	vt->pvda_svp_prepare               = guard_svp_prepare;
+	vt->pvda_svp_apply_dft             = guard_svp_apply_dft;
+	vt->pvda_svp_apply_dft_to_dft      = guard_svp_apply_dft_to_dft;
+	vt->pvda_delete_svp_ppol           = guard_delete_svp_ppol;
+	vt->pvda_vmp_prepare_contiguous    = guard_vmp_prepare_contiguous;
+	vt->pvda_vmp_apply_dft             = guard_vmp_apply_dft;
+	vt->pvda_vmp_apply_dft_to_dft      = guard_vmp_apply_dft_to_dft;
+	vt->pvda_vmp_apply_prepared_to_dft = guard_vmp_apply_prepared_to_dft;
+	vt->pvda_delete_vmp_pmat           = guard_delete_vmp_pmat;
+	vt->pvda_vec_znx_normalize_base2k  = guard_vec_znx_normalize_base2k;
+	vt->pvda_znx_small_product         = guard_znx_small_product;
+	vt->pvda_vec_znx_negate            = guard_vec_znx_negate;
+	vt->pvda_vec_znx_add               = guard_vec_znx_add;
+	vt->pvda_vec_znx_sub               = guard_vec_znx_sub;
+	vt->pvda_znx_automorphism          = guard_znx_automorphism;
+	vt->pvda_vec_znx_automorphism      = guard_vec_znx_automorphism;
+	vt->pvda_vec_znx_rotate            = guard_vec_znx_rotate;
+	vt->pvda_vmp_prepare_vec           = guard_vmp_prepare_vec;
+	// allocations, pvda_module_extract_nn, the RNG and number-theory entries stay the spqlios ones
 }

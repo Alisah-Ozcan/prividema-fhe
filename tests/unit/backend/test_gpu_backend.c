@@ -1,10 +1,12 @@
 #include <criterion/criterion.h>
 #include <criterion/new/assert.h>
+#include <cuda.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "backend/backend.h"
+#include "backend/backend_arithmetic.h"
 #include "core/ggsw/ggsw_arithmetic.h"
 #include "core/ggsw/ggsw_ciphertext.h"
 #include "core/ggsw/ggsw_params.h"
@@ -241,4 +243,84 @@ Test(gpu_backend, same_code_on_both_backends)
 	delete_glwe_params(params);
 	pvda_delete_backend(cpu);
 	pvda_delete_backend(gpu);
+}
+
+// A spqlios backend given GPU objects reports them instead of dereferencing them
+Test(gpu_backend, spqlios_backend_rejects_gpu_operands)
+{
+	PvdaBackend* cpu        = pvda_new_spqlios_backend(NN);
+	PvdaBackend* gpu        = pvda_new_cuda_backend(NN);
+	GLWEParams* params      = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
+	GGSWParams* ggsw_params = new_ggsw_params(params, 1, KAPPA, LIMBS);
+
+	GLWECiphertext* host     = new_glwe(params);
+	GLWECiphertext* dev      = new_glwe_on(gpu, params);
+	GLWECiphertext* dev_res  = new_glwe_on(gpu, params);
+	GGSWCiphertext* ggsw     = new_ggsw_on(gpu, ggsw_params);
+	GGSWCiphertextPrep* prep = new_ggsw_prep_on(gpu, ggsw_params);
+	cr_assert_eq(ggsw_prepare(gpu, prep, ggsw), 0);
+
+	// Operations returning a status fail with -1
+	cr_assert_eq(normalize_glwe(cpu, dev_res, dev), -1);
+	cr_assert_eq(ggsw_external_product(cpu, dev_res, dev, prep), -1);
+	PolyBiv v = glwe_flattened_biv(dev);
+	cr_assert_eq(pvda_vec_znx_add(cpu, &v, &v, &v), -1);
+
+	// Void operations leave their GPU result untouched
+	for (uint64_t i = 0; i < glwe_coef_number(params); ++i) host->vec[i] = (int64_t)i;
+	GLWECiphertext* marked = glwe_clone_on(gpu, host);
+	add_glwe(cpu, marked, dev, dev);
+	GLWECiphertext* back = new_glwe(params);
+	glwe_copy_to_host(back, marked);
+	cr_assert(eq(int, memcmp(back->vec, host->vec, glwe_coef_number(params) * sizeof(int64_t)), 0));
+
+	delete_glwe(back);
+	delete_glwe(marked);
+	delete_ggsw_prep(prep);
+	delete_ggsw(ggsw);
+	delete_glwe(dev_res);
+	delete_glwe(dev);
+	delete_glwe(host);
+	delete_ggsw_params(ggsw_params);
+	delete_glwe_params(params);
+	pvda_delete_backend(cpu);
+	pvda_delete_backend(gpu);
+}
+
+// A host-only program in a CUDA build does not initialize CUDA (no context on the GPU)
+Test(gpu_backend, host_only_use_does_not_initialize_cuda)
+{
+	PvdaBackend* cpu         = pvda_new_spqlios_backend(NN);
+	GLWEParams* params       = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
+	GLWESecretKey* sk        = alloc_glwe_secret_key(params);
+	GLWESecretKeyPrepared* p = alloc_glwe_secret_key_prepared(params);
+	uniform_glwe_secret_key(cpu, sk, 1);
+	glwe_sk_prepare(cpu, p, sk);
+
+	PolyBiv* m          = new_biv(params);
+	GLWECiphertext* ct  = new_glwe(params);
+	GLWECiphertext* ct2 = new_glwe(params);
+	uniform_random_biv_poly(cpu, params, m, 1);
+	glwe_secret_encrypt_phase(cpu, ct, p, m);
+	add_glwe(cpu, ct2, ct, ct);
+	normalize_glwe(cpu, ct2, ct2);
+	glwe_copy(ct, ct2);
+	glwe_copy_to_host(ct, ct2);
+	GLWECiphertext* ct3 = glwe_clone_on(cpu, ct);
+	delete_glwe(ct3);
+	delete_glwe(ct2);
+	delete_glwe(ct);
+	delete_biv(m);
+	delete_glwe_secret_key(sk);
+	delete_glwe_secret_key_prepared(p);
+	delete_glwe_params(params);
+	pvda_delete_backend(cpu);
+
+	cr_assert_eq(cuInit(0), CUDA_SUCCESS);
+	CUdevice dev;
+	cr_assert_eq(cuDeviceGet(&dev, 0), CUDA_SUCCESS);
+	unsigned int flags = 0;
+	int active         = 1;
+	cr_assert_eq(cuDevicePrimaryCtxGetState(dev, &flags, &active), CUDA_SUCCESS);
+	cr_assert_eq(active, 0, "host-only use created a CUDA context");
 }

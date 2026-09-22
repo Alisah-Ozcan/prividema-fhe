@@ -39,6 +39,10 @@ PvdaBackend* pvda_new_spqlios_backend(int nn)
 	res->pvda_fft_data = new_fft_data(nn);
 	pvda_fill_cpu_nt(&res->vt);
 	res->host_vt = res->vt;
+#ifdef ENABLE_CUDA
+	// GPU objects passed to a spqlios backend are reported instead of crashing it
+	pvda_fill_spqlios_gpu_guard(&res->vt);
+#endif
 	return res;
 }
 
@@ -99,7 +103,7 @@ void* pvda_alloc_on(const PvdaBackend* backend, size_t bytes)
 int pvda_is_gpu_memory(const void* ptr)
 {
 #ifdef ENABLE_CUDA
-	if (ptr) return pvda_is_device_pointer(ptr);
+	if (ptr) return pvda_gpu_owns(ptr);
 #endif
 	(void)ptr;
 	return 0;
@@ -109,7 +113,7 @@ void pvda_free_any(void* ptr)
 {
 	if (!ptr) return;
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(ptr))
+	if (pvda_gpu_owns(ptr))
 	{
 		pvda_gpu_free((int64_t*)ptr);
 		return;
@@ -122,7 +126,7 @@ void pvda_memcpy_any(void* dst, const void* src, size_t bytes)
 {
 	if (bytes == 0) return;
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(dst) || pvda_is_device_pointer(src))
+	if (pvda_gpu_owns(dst) || pvda_gpu_owns(src))
 	{
 		pvda_gpu_memcpy(dst, src, bytes);
 		return;
@@ -135,7 +139,7 @@ void pvda_memzero_any(void* ptr, size_t bytes)
 {
 	if (bytes == 0) return;
 #ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(ptr))
+	if (pvda_gpu_owns(ptr))
 	{
 		pvda_gpu_memzero(ptr, bytes);
 		return;

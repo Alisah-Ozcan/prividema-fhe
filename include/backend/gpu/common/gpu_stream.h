@@ -46,6 +46,10 @@ void pvda_gpu_release_cached_memory(void);
 // Returns 1 if a CUDA device can be used, 0 otherwise (never throws).
 int pvda_gpu_available(void);
 
+// Returns 1 if ptr points into GPU memory allocated by the library (pvda_gpu_alloc and the GPU
+// objects), 0 otherwise. Does not use the CUDA runtime, so it is cheap and never initializes CUDA.
+int pvda_gpu_owns(const void* ptr);
+
 // Copies bytes between any two of host and GPU memory, on the active stream. Returns once
 // the data is readable when dst is host memory.
 void pvda_gpu_memcpy(void* dst, const void* src, size_t bytes);

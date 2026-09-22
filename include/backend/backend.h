@@ -82,24 +82,27 @@ PvdaBackendType pvda_backend_type(const PvdaBackend* backend);
 void* pvda_alloc_on(const PvdaBackend* backend, size_t bytes);
 
 /**
- * @brief Tells whether a buffer is in GPU memory (always 0 in a build without ENABLE_CUDA)
+ * @brief Tells whether a buffer is in GPU memory allocated by the library (always 0 in a build
+ * without ENABLE_CUDA)
+ *
+ * Does not use the CUDA runtime: host-only programs never initialize CUDA.
  */
 int pvda_is_gpu_memory(const void* ptr);
 
 /**
- * @brief Frees a buffer in host memory (from malloc and the like) or in GPU memory
+ * @brief Frees a buffer in host memory (from malloc and the like) or in GPU memory allocated by the library
  */
 void pvda_free_any(void* ptr);
 
 /**
- * @brief Copies bytes between two buffers, each in host or GPU memory
+ * @brief Copies bytes between two buffers, each in host memory or GPU memory allocated by the library
  *
  * Returns once the data is readable when dst is host memory.
  */
 void pvda_memcpy_any(void* dst, const void* src, size_t bytes);
 
 /**
- * @brief Zeroes bytes of a buffer in host or GPU memory
+ * @brief Zeroes bytes of a buffer in host memory or GPU memory allocated by the library
  */
 void pvda_memzero_any(void* ptr, size_t bytes);
 

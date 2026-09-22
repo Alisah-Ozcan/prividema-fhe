@@ -71,8 +71,9 @@ the results are then moved to the GPU with the `*_clone_on` functions.
 
 ### Rules
 
-- **Use a CUDA backend with GPU objects.** A spqlios backend treats every buffer as host memory,
-  so GPU objects passed to it are not detected.
+- **Use a CUDA backend with GPU objects.** In a CUDA build, a spqlios backend given GPU objects
+  logs an error and returns -1 (it recognizes the GPU memory allocated by the library, without
+  using the CUDA runtime: host-only programs never initialize CUDA).
 - **Keep the operands of an operation on one side.** An operation whose operands mix host and
   GPU memory logs an error and returns -1 instead of running (void functions leave their
   result untouched). The half-products accept their `a` operand on either side.

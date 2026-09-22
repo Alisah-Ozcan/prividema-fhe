@@ -19,4 +19,11 @@
  */
 void pvda_fill_cuda(struct pvda_virtual_table* vt);
 
+/**
+ * @brief Fills vt with the spqlios operations guarded against GPU operands (host_vt must hold
+ * the spqlios table): in a CUDA build, an operation of a spqlios backend given GPU memory
+ * allocated by the library logs an error and returns -1 instead of dereferencing it.
+ */
+void pvda_fill_spqlios_gpu_guard(struct pvda_virtual_table* vt);
+
 #endif
