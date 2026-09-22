@@ -33,6 +33,12 @@ void pvda_gpu_stream_pop(void);
 // Returns this thread's current active stream (NULL means default stream).
 void* pvda_gpu_stream_get_active(void);
 
+// GPU buffers are served from a stream-ordered memory pool that keeps freed
+// memory cached for reuse (bounded by the PVDA_GPU_POOL_CACHE_MB environment
+// variable, unbounded by default). Synchronizes the device and returns all
+// cached, currently unused memory to the driver.
+void pvda_gpu_release_cached_memory(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -36,6 +36,15 @@ class CudaException : public std::exception {
 		}                                                     \
 	} while (0)
 
+// Device memory allocation used by every GPU backend buffer (pvda_gpu_alloc,
+// prepared matrices, VEC_GPU scratch). Stream-ordered (cudaMallocAsync /
+// cudaFreeAsync on gpu_active_stream) from the device's default memory pool,
+// configured to keep freed memory cached: unlike cudaMalloc/cudaFree, neither
+// call synchronizes the device, so short-lived scratch buffers are cheap.
+// Defined in gpu_stream.cu.
+void* pvda_device_alloc_bytes(size_t bytes);
+void pvda_device_free_bytes(void* ptr);
+
 inline bool is_gpu_device_pointer(const void* ptr)
 {
 	if (ptr == nullptr)
@@ -99,7 +108,7 @@ class VEC_GPU {
 	{
 		if (d_ptr_)
 		{
-			(void)cudaFree(d_ptr_);
+			pvda_device_free_bytes(d_ptr_);
 		}
 		d_ptr_ = nullptr;
 		size_  = 0;
@@ -109,8 +118,8 @@ class VEC_GPU {
 	{
 		reset();
 		if (size == 0) return;
-		CUDA_CHECK(cudaMalloc((void**)&d_ptr_, size * sizeof(T)));
-		size_ = size;
+		d_ptr_ = (T*)pvda_device_alloc_bytes(size * sizeof(T));
+		size_  = size;
 	}
 
 	void copy_from_host(const T* host_ptr, size_t size)

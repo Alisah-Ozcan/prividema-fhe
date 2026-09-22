@@ -18,8 +18,7 @@ int pvda_is_device_pointer(const void* ptr) { return is_gpu_device_pointer(ptr) 
 
 int64_t* pvda_gpu_upload(const int64_t* host_ptr, size_t n_elements)
 {
-	Data64s* d_ptr = nullptr;
-	CUDA_CHECK(cudaMalloc((void**)&d_ptr, n_elements * sizeof(int64_t)));
+	Data64s* d_ptr = (Data64s*)pvda_device_alloc_bytes(n_elements * sizeof(int64_t));
 	CUDA_CHECK(
 	    cudaMemcpyAsync(d_ptr, host_ptr, n_elements * sizeof(int64_t), cudaMemcpyHostToDevice, gpu_active_stream));
 	return (int64_t*)d_ptr;
@@ -35,14 +34,9 @@ void pvda_gpu_download(int64_t* host_ptr, const int64_t* device_ptr, size_t n_el
 	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
-int64_t* pvda_gpu_alloc(size_t n_elements)
-{
-	Data64s* d_ptr = nullptr;
-	CUDA_CHECK(cudaMalloc((void**)&d_ptr, n_elements * sizeof(int64_t)));
-	return (int64_t*)d_ptr;
-}
+int64_t* pvda_gpu_alloc(size_t n_elements) { return (int64_t*)pvda_device_alloc_bytes(n_elements * sizeof(int64_t)); }
 
-void pvda_gpu_free(int64_t* device_ptr) { cudaFree(device_ptr); }
+void pvda_gpu_free(int64_t* device_ptr) { pvda_device_free_bytes(device_ptr); }
 
 void pvda_gpu_copy(int64_t* dst, const int64_t* src, size_t n_elements)
 {
@@ -247,8 +241,7 @@ void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw)
 	}
 
 	// GPU_NTT output must be Data64* (unsigned); allocate separately then store as MatBivDFT*
-	Data64* d_ntt = nullptr;
-	CUDA_CHECK(cudaMalloc((void**)&d_ntt, nrows * ncols * n * sizeof(Data64)));
+	Data64* d_ntt = (Data64*)pvda_device_alloc_bytes(nrows * ncols * n * sizeof(Data64));
 	gpuntt::GPU_NTT((Data64s*)d_src, d_ntt, ntt_tab, mod, cfg_fwd, (int)(nrows * ncols));
 	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 
@@ -365,8 +358,7 @@ void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadget
 		d_src = d_tmp;
 	}
 
-	Data64* d_ntt = nullptr;
-	CUDA_CHECK(cudaMalloc((void**)&d_ntt, nrows * ncols * n * sizeof(Data64)));
+	Data64* d_ntt = (Data64*)pvda_device_alloc_bytes(nrows * ncols * n * sizeof(Data64));
 	gpuntt::GPU_NTT((Data64s*)d_src, d_ntt, ntt_tab, mod, cfg_fwd, (int)(nrows * ncols));
 	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 

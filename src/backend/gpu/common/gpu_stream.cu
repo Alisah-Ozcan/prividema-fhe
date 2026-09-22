@@ -1,3 +1,5 @@
+#include <cstdint>
+#include <cstdlib>
 #include <vector>
 
 #include "gpu/common/gpu_common.h"
@@ -7,6 +9,59 @@ thread_local cudaStream_t gpu_active_stream = 0;
 
 namespace {
 thread_local std::vector<cudaStream_t> gpu_stream_stack;
+}
+
+namespace {
+// Freed blocks stay cached in the device's default pool (the pool's default
+// release threshold of 0 would hand memory back to the driver at every
+// synchronization point, making each allocation as expensive as cudaMalloc).
+// The threshold counts in-use memory too, so any finite default would disable
+// caching as soon as a workload keeps that much data resident (e.g. a PIR
+// database): the cache is unbounded by default, like PyTorch's caching
+// allocator. PVDA_GPU_POOL_CACHE_MB bounds it (useful when several processes
+// share the GPU), pvda_gpu_release_cached_memory() empties it, and an
+// allocation that runs out of memory empties it and retries once.
+cudaMemPool_t default_mempool()
+{
+	static cudaMemPool_t pool = [] {
+		int device = 0;
+		CUDA_CHECK(cudaGetDevice(&device));
+		cudaMemPool_t p;
+		CUDA_CHECK(cudaDeviceGetDefaultMemPool(&p, device));
+		uint64_t threshold = UINT64_MAX;
+		if (const char* env = std::getenv("PVDA_GPU_POOL_CACHE_MB")) threshold = std::strtoull(env, nullptr, 10) << 20;
+		CUDA_CHECK(cudaMemPoolSetAttribute(p, cudaMemPoolAttrReleaseThreshold, &threshold));
+		return p;
+	}();
+	return pool;
+}
+}  // namespace
+
+void* pvda_device_alloc_bytes(size_t bytes)
+{
+	(void)default_mempool();  // configures the pool's release threshold on first use
+	void* ptr       = nullptr;
+	cudaError_t err = cudaMallocAsync(&ptr, bytes, gpu_active_stream);
+	if (err == cudaErrorMemoryAllocation)
+	{
+		// Out of memory: give every cached block back to the driver and retry once.
+		(void)cudaGetLastError();
+		pvda_gpu_release_cached_memory();
+		err = cudaMallocAsync(&ptr, bytes, gpu_active_stream);
+	}
+	CUDA_CHECK(err);
+	return ptr;
+}
+
+// The block is only reused once the work already queued on gpu_active_stream
+// has completed. Every GPU backend buffer is freed on the stream that last
+// used it, or on the legacy default stream, which is ordered after all
+// blocking streams (the ones pvda_gpu_stream_create makes). Errors are
+// ignored, like the cudaFree this replaces: static objects may be released
+// after the CUDA runtime has already shut down at program exit.
+void pvda_device_free_bytes(void* ptr)
+{
+	if (ptr) (void)cudaFreeAsync(ptr, gpu_active_stream);
 }
 
 extern "C" {
@@ -44,5 +99,11 @@ void pvda_gpu_stream_pop(void)
 }
 
 void* pvda_gpu_stream_get_active(void) { return (void*)gpu_active_stream; }
+
+void pvda_gpu_release_cached_memory(void)
+{
+	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaMemPoolTrimTo(default_mempool(), 0));
+}
 
 }  // extern "C"
