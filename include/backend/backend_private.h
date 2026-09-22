@@ -83,6 +83,7 @@ typedef struct pvda_virtual_table
 
 struct pvda_module_t
 {
+	PvdaBackendType type;
 	SPQLIOS_MODULE* spqlios_module;
 	struct pvda_fft_data_t* pvda_fft_data;
 

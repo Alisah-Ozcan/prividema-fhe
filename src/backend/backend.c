@@ -14,9 +14,17 @@
 #include "impls/rng_openssl.h"
 #endif
 
+#ifdef ENABLE_CUDA
+#include "gpu/common/gpu_nttparameters.h"
+#include "gpu/common/gpu_stream.h"
+#endif
+
+#include "logger.h"
+
 PvdaBackend* pvda_new_spqlios_backend(int nn)
 {
 	PvdaBackend* res    = malloc(sizeof(PvdaBackend));
+	res->type           = PVDA_BACKEND_SPQLIOS;
 	res->spqlios_module = spqlios_new_module_info(nn);
 	pvda_fill_spqlios(&res->vt);
 #ifdef OPENSSL_BACKEND
@@ -28,6 +36,43 @@ PvdaBackend* pvda_new_spqlios_backend(int nn)
 	pvda_fill_cpu_nt(&res->vt);
 	return res;
 }
+
+PvdaBackend* pvda_new_cuda_backend(int nn)
+{
+#ifdef ENABLE_CUDA
+	if (!pvda_gpu_available())
+	{
+		log_message(LOG_ERROR, "pvda_new_cuda_backend: no CUDA device available");
+		return NULL;
+	}
+	// The CUDA backend embeds a spqlios backend for the host-side operations
+	// that have no GPU implementation (encryption, key generation, ...)
+	PvdaBackend* res = pvda_new_spqlios_backend(nn);
+	if (!res) return NULL;
+	res->type = PVDA_BACKEND_CUDA;
+	gpu_ntt_initialize((size_t)nn);
+	return res;
+#else
+	(void)nn;
+	log_message(LOG_ERROR, "pvda_new_cuda_backend: prividema-fhe was built without ENABLE_CUDA");
+	return NULL;
+#endif
+}
+
+PvdaBackend* pvda_new_backend(PvdaBackendConfig config)
+{
+	switch (config.type)
+	{
+		case PVDA_BACKEND_SPQLIOS:
+			return pvda_new_spqlios_backend((int)config.nn);
+		case PVDA_BACKEND_CUDA:
+			return pvda_new_cuda_backend((int)config.nn);
+	}
+	log_message(LOG_ERROR, "pvda_new_backend: unknown backend type");
+	return NULL;
+}
+
+PvdaBackendType pvda_backend_type(const PvdaBackend* backend) { return backend->type; }
 
 void pvda_delete_backend(PvdaBackend* backend)
 {

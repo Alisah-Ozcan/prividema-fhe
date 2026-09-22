@@ -39,6 +39,9 @@ void* pvda_gpu_stream_get_active(void);
 // cached, currently unused memory to the driver.
 void pvda_gpu_release_cached_memory(void);
 
+// Returns 1 if a CUDA device can be used, 0 otherwise (never throws).
+int pvda_gpu_available(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -9,6 +9,14 @@
 typedef struct pvda_module_t PvdaBackend;
 
 /**
+ * @brief Kinds of Prividema-FHE backends
+ */
+typedef enum pvda_backend_type_t {
+	PVDA_BACKEND_SPQLIOS = 0,  ///< CPU backend (spqlios-arithmetic, AVX)
+	PVDA_BACKEND_CUDA    = 1,  ///< GPU backend (CUDA), only available when built with ENABLE_CUDA
+} PvdaBackendType;
+
+/**
  * @brief Configuration struct for a Prividema-FHE backend
  *
  * Still very much a workd in progress
@@ -16,6 +24,7 @@ typedef struct pvda_module_t PvdaBackend;
 typedef struct pvda_module_config_t
 {
 	uint64_t nn;
+	PvdaBackendType type;  ///< Defaults to PVDA_BACKEND_SPQLIOS when zero-initialized
 
 } PvdaBackendConfig;
 
@@ -31,15 +40,38 @@ typedef struct pvda_module_config_t
 PvdaBackend* pvda_new_spqlios_backend(int nn);
 
 /**
- * NOT YET IMPLEMENTED
- * @brief Create a new backend according to the configuration struct
+ * @brief Creates a backend that runs on the GPU with CUDA
  *
+ * Objects created on this backend (see the *_on constructors) live in GPU memory and
+ * operations on them run on the GPU. Host-side work that has no GPU implementation
+ * (encryption, key generation, decryption) is done on the CPU by the backend's embedded
+ * spqlios backend, on host objects. Creating the backend prepares the GPU for parameter
+ * N (NTT tables, memory pool).
+ *
+ * @param nn Parameter N
+ *
+ * @return NULL if the library was built without ENABLE_CUDA or no CUDA device is
+ *         available, a pointer to the new backend otherwise
+ */
+PvdaBackend* pvda_new_cuda_backend(int nn);
+
+/**
+ * @brief Create a new backend according to the configuration struct
  *
  * @param config A backend configuration struct
  *
  * @return NULL in case of failure, a pointer to the new backend otherwise
  */
 PvdaBackend* pvda_new_backend(PvdaBackendConfig config);
+
+/**
+ * @brief Retrieves the kind of a Prividema-FHE backend
+ *
+ * @param backend The backend
+ *
+ * @return The backend type
+ */
+PvdaBackendType pvda_backend_type(const PvdaBackend* backend);
 
 /**
  * @brief Delete a Prividema-FHE backend

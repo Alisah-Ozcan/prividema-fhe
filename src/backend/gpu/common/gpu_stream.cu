@@ -100,6 +100,17 @@ void pvda_gpu_stream_pop(void)
 
 void* pvda_gpu_stream_get_active(void) { return (void*)gpu_active_stream; }
 
+int pvda_gpu_available(void)
+{
+	int count = 0;
+	if (cudaGetDeviceCount(&count) != cudaSuccess)
+	{
+		(void)cudaGetLastError();
+		return 0;
+	}
+	return count > 0;
+}
+
 void pvda_gpu_release_cached_memory(void)
 {
 	CUDA_CHECK(cudaDeviceSynchronize());
