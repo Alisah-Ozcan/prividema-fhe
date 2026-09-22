@@ -74,6 +74,14 @@ cleanup:
 	return NULL;
 }
 
+GLWEAutomorphismKey* new_automorphism_key_on(const PvdaBackend* backend, GLWEGadgetParams* params)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_automorphism_key_device(params);
+#endif
+	return new_automorphism_key(params);
+}
+
 #ifdef ENABLE_CUDA
 GLWEAutomorphismKey* pvda_new_automorphism_key_device(GLWEGadgetParams* params)
 {

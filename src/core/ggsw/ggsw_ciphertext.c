@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "backend_arithmetic.h"
 #include "bivariate_polynomial.h"
@@ -51,6 +52,38 @@ void delete_ggsw(GGSWCiphertext* ggsw)
 	free(ggsw->mat);
 #endif
 	free(ggsw);
+}
+
+GGSWCiphertext* new_ggsw_on(const PvdaBackend* backend, const GGSWParams* params_ggsw)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_ggsw_device(params_ggsw);  // zeroed
+#endif
+	return new_ggsw(params_ggsw);
+}
+
+GGSWCiphertext* ggsw_clone_on(const PvdaBackend* backend, const GGSWCiphertext* src)
+{
+	size_t n_elems = ggsw_coef_number(src->params);
+#ifdef ENABLE_CUDA
+	int src_on_device = pvda_is_device_pointer(src->mat);
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
+	{
+		if (!src_on_device) return pvda_ggsw_upload(src);
+		GGSWCiphertext* dst = pvda_new_ggsw_device(src->params);
+		if (dst) pvda_gpu_copy((int64_t*)dst->mat, (const int64_t*)src->mat, n_elems);
+		return dst;
+	}
+	if (src_on_device)
+	{
+		GGSWCiphertext* dst = new_ggsw(src->params);
+		if (dst) pvda_gpu_download((int64_t*)dst->mat, (const int64_t*)src->mat, n_elems);
+		return dst;
+	}
+#endif
+	GGSWCiphertext* dst = new_ggsw(src->params);
+	if (dst) memcpy(dst->mat, src->mat, n_elems * sizeof(int64_t));
+	return dst;
 }
 
 VecBiv* ggsw_retrieve_bivglwe(GGSWCiphertext* ggsw_ct, int64_t sk_idx, int64_t prec_lvl)
@@ -166,6 +199,14 @@ GGSWCiphertextPrep* new_ggsw_prep(const GGSWParams* params_ggsw)
 cleanup:
 	delete_ggsw_prep(ggsw_mat_dft);
 	return NULL;
+}
+
+GGSWCiphertextPrep* new_ggsw_prep_on(const PvdaBackend* backend, const GGSWParams* params_ggsw)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_ggsw_prep_device(params_ggsw);
+#endif
+	return new_ggsw_prep(params_ggsw);
 }
 
 void delete_ggsw_prep(GGSWCiphertextPrep* ggsw_dft)

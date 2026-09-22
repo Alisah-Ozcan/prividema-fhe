@@ -35,6 +35,43 @@ cleanup:
 	return NULL;
 }
 
+GLWEGadgetCiphertext* new_glwegadget_on(const PvdaBackend* backend, const GLWEGadgetParams* params)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
+	{
+		GLWEGadgetCiphertext* glwegadget = pvda_new_glwegadget_device(params);
+		if (glwegadget) pvda_gpu_zero((int64_t*)glwegadget->mat, glwegadget_coef_number(params));
+		return glwegadget;
+	}
+#endif
+	return new_glwegadget(params);
+}
+
+GLWEGadgetCiphertext* glwegadget_clone_on(const PvdaBackend* backend, const GLWEGadgetCiphertext* src)
+{
+	size_t n_elems = glwegadget_coef_number(src->params);
+#ifdef ENABLE_CUDA
+	int src_on_device = pvda_is_device_pointer(src->mat);
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
+	{
+		if (!src_on_device) return pvda_glwegadget_upload(src);
+		GLWEGadgetCiphertext* dst = pvda_new_glwegadget_device(src->params);
+		if (dst) pvda_gpu_copy((int64_t*)dst->mat, (const int64_t*)src->mat, n_elems);
+		return dst;
+	}
+	if (src_on_device)
+	{
+		GLWEGadgetCiphertext* dst = new_glwegadget(src->params);
+		if (dst) pvda_gpu_download((int64_t*)dst->mat, (const int64_t*)src->mat, n_elems);
+		return dst;
+	}
+#endif
+	GLWEGadgetCiphertext* dst = new_glwegadget(src->params);
+	if (dst) memcpy(dst->mat, src->mat, n_elems * sizeof(int64_t));
+	return dst;
+}
+
 void delete_glwegadget(GLWEGadgetCiphertext* glwegadget_ct)
 {
 	if (!glwegadget_ct) return;
@@ -80,6 +117,14 @@ GLWEGadgetCiphertextPrep* new_glwegadget_prep(const GLWEGadgetParams* params)
 cleanup:
 	free(glwegad_prep);
 	return NULL;
+}
+
+GLWEGadgetCiphertextPrep* new_glwegadget_prep_on(const PvdaBackend* backend, const GLWEGadgetParams* params)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_glwegadget_prep_device(params);
+#endif
+	return new_glwegadget_prep(params);
 }
 
 void delete_glwegadget_prep(GLWEGadgetCiphertextPrep* glwegadget_prep_ct)

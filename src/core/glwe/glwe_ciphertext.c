@@ -86,6 +86,56 @@ cleanup:
 	return status;
 }
 
+GLWECiphertext* new_glwe_on(const PvdaBackend* backend, const GLWEParams* params)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
+	{
+		GLWECiphertext* glwe = pvda_new_glwe_device(params);
+		if (glwe) pvda_gpu_zero((int64_t*)glwe->vec, glwe_coef_number(params));
+		return glwe;
+	}
+#endif
+	return new_glwe(params);
+}
+
+GLWECiphertext* glwe_clone_on(const PvdaBackend* backend, const GLWECiphertext* src)
+{
+	GLWECiphertext* dst = NULL;
+#ifdef ENABLE_CUDA
+	int src_on_device = pvda_is_device_pointer(src->vec);
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
+	{
+		if (!src_on_device) return pvda_glwe_upload(src);
+		dst = pvda_new_glwe_device(src->params);
+		if (dst) pvda_gpu_copy((int64_t*)dst->vec, (const int64_t*)src->vec, glwe_coef_number(src->params));
+		return dst;
+	}
+	if (src_on_device)
+	{
+		dst = new_glwe(src->params);
+		if (dst) pvda_glwe_download(dst, src);
+		return dst;
+	}
+#endif
+	dst = new_glwe(src->params);
+	if (dst) memcpy(dst->vec, src->vec, glwe_coef_number(src->params) * sizeof(int64_t));
+	return dst;
+}
+
+void glwe_copy_to_host(GLWECiphertext* host_dst, const GLWECiphertext* src)
+{
+	assert(glwe_coef_number(host_dst->params) == glwe_coef_number(src->params));
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(src->vec))
+	{
+		pvda_glwe_download(host_dst, src);
+		return;
+	}
+#endif
+	memcpy(host_dst->vec, src->vec, glwe_coef_number(src->params) * sizeof(int64_t));
+}
+
 void glwe_copy(GLWECiphertext* dst, const GLWECiphertext* src)
 {
 	size_t src_elems = glwe_coef_number(src->params);
@@ -164,6 +214,14 @@ GLWECiphertextDFT* new_glwe_dft(const GLWEParams* params)
 cleanup:
 	free(glwe_dft);
 	return NULL;
+}
+
+GLWECiphertextDFT* new_glwe_dft_on(const PvdaBackend* backend, const GLWEParams* params)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_glwe_dft_device(params);
+#endif
+	return new_glwe_dft(params);
 }
 
 void delete_glwe_dft(GLWECiphertextDFT* glwe)

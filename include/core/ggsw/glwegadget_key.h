@@ -52,6 +52,15 @@ typedef struct glwe_automorphism_keyswitching_key_t
 GLWEAutomorphismKey* new_automorphism_key(GLWEGadgetParams* params);
 
 /**
+ * @brief Creates an automorphism key for a backend
+ *
+ * compute_automorphism_key then prepares it for that backend (on the GPU for a CUDA
+ * backend), to be used with ciphertexts placed on the same backend. Free with
+ * delete_automorphism_key.
+ */
+GLWEAutomorphismKey* new_automorphism_key_on(const PvdaBackend* backend, GLWEGadgetParams* params);
+
+/**
  * @brief Deletes an automorphism key
  *
  * @param automorphism_key The automorphism key to delete

@@ -43,6 +43,41 @@ typedef struct glwe_ciphertext
 GLWECiphertext* new_glwe(const GLWEParams* params_glwe);
 
 /**
+ * @brief Allocates a zero-initialized GLWE ciphertext on a backend
+ *
+ * With a CUDA backend the ciphertext lives in GPU memory and the operations applied to it
+ * run on the GPU; with a spqlios backend this is new_glwe. Free with delete_glwe.
+ *
+ * @param backend      The backend the ciphertext is placed on
+ * @param params_glwe  The GLWE parameters
+ *
+ * @return NULL in case of failure, the new ciphertext otherwise
+ */
+GLWECiphertext* new_glwe_on(const PvdaBackend* backend, const GLWEParams* params_glwe);
+
+/**
+ * @brief Allocates a copy of a GLWE ciphertext (host or GPU resident) on a backend
+ *
+ * Typically used to move host-encrypted ciphertexts to a CUDA backend. Free with delete_glwe.
+ *
+ * @param backend The backend the copy is placed on
+ * @param src     The ciphertext to copy
+ *
+ * @return NULL in case of failure, the new ciphertext otherwise
+ */
+GLWECiphertext* glwe_clone_on(const PvdaBackend* backend, const GLWECiphertext* src);
+
+/**
+ * @brief Copies a GLWE ciphertext (host or GPU resident) into a host ciphertext of the same params
+ *
+ * Typically used to bring a result computed on a CUDA backend back for decryption.
+ *
+ * @param host_dst The host ciphertext written to
+ * @param src      The ciphertext to copy
+ */
+void glwe_copy_to_host(GLWECiphertext* host_dst, const GLWECiphertext* src);
+
+/**
  * @brief Deletes a bivariate GLWE ciphertext.
  *
  * @param glwe The bivariate GLWE ciphertext.
@@ -176,6 +211,13 @@ typedef struct glwe_ciphertext_dft
  * @return A pointer to the new object or NULL in case of a failure
  */
 GLWECiphertextDFT* new_glwe_dft(const GLWEParams* params_glwe);
+
+/**
+ * @brief Allocates a GLWE ciphertext in the backend's DFT domain (the NTT domain on a CUDA backend)
+ *
+ * Free with delete_glwe_dft.
+ */
+GLWECiphertextDFT* new_glwe_dft_on(const PvdaBackend* backend, const GLWEParams* params_glwe);
 
 /**
  * @brief Deletes a GLWE ciphertext, but not its parameters.

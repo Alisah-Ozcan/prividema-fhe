@@ -48,6 +48,20 @@ typedef struct ggsw_ciphertext
 GGSWCiphertext* new_ggsw(const GGSWParams* params_ggsw);
 
 /**
+ * @brief Allocates a zero-initialized GGSW ciphertext on a backend (GPU memory on a CUDA backend)
+ *
+ * Free with delete_ggsw.
+ */
+GGSWCiphertext* new_ggsw_on(const PvdaBackend* backend, const GGSWParams* params_ggsw);
+
+/**
+ * @brief Allocates a copy of a raw GGSW ciphertext (host or GPU resident) on a backend
+ *
+ * Free with delete_ggsw.
+ */
+GGSWCiphertext* ggsw_clone_on(const PvdaBackend* backend, const GGSWCiphertext* src);
+
+/**
  * @brief Deletes a GGSW ciphertext.
  *
  * @param ggsw A Pointer to the GGSW parameters.
@@ -140,6 +154,14 @@ typedef struct ggsw_ciphertext_prepared
  * @retval non-NULL The Allocated GGSW ciphertext filled with 0 otherwise.
  */
 GGSWCiphertextPrep* new_ggsw_prep(const GGSWParams* params_ggsw);
+
+/**
+ * @brief Allocates a prepared GGSW ciphertext for a backend
+ *
+ * ggsw_prepare fills it from a raw GGSW placed on the same backend (NTT domain on a CUDA
+ * backend, spqlios DFT domain otherwise). Free with delete_ggsw_prep.
+ */
+GGSWCiphertextPrep* new_ggsw_prep_on(const PvdaBackend* backend, const GGSWParams* params_ggsw);
 
 /**
  * @brief Deletes a prepared GGSW ciphertext

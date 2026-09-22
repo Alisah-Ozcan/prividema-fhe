@@ -50,6 +50,20 @@ typedef struct glwegadget_ciphertext
 GLWEGadgetCiphertext* new_glwegadget(const GLWEGadgetParams* params);
 
 /**
+ * @brief Allocates a zero-initialized GLWEGadget ciphertext on a backend (GPU memory on a CUDA backend)
+ *
+ * Free with delete_glwegadget.
+ */
+GLWEGadgetCiphertext* new_glwegadget_on(const PvdaBackend* backend, const GLWEGadgetParams* params);
+
+/**
+ * @brief Allocates a copy of a raw GLWEGadget ciphertext (host or GPU resident) on a backend
+ *
+ * Free with delete_glwegadget.
+ */
+GLWEGadgetCiphertext* glwegadget_clone_on(const PvdaBackend* backend, const GLWEGadgetCiphertext* src);
+
+/**
  * @brief Deletes a GLWEGadget ciphertext
  *
  * @param glwegadget_ct The ciphertext to delete
@@ -94,6 +108,14 @@ typedef struct glwegadget_ciphertext_prepared
  *
  */
 GLWEGadgetCiphertextPrep* new_glwegadget_prep(const GLWEGadgetParams* params);
+
+/**
+ * @brief Allocates a prepared GLWEGadget ciphertext for a backend
+ *
+ * glwegadget_prepare fills it from a raw GLWEGadget placed on the same backend. Free with
+ * delete_glwegadget_prep.
+ */
+GLWEGadgetCiphertextPrep* new_glwegadget_prep_on(const PvdaBackend* backend, const GLWEGadgetParams* params);
 
 /**
  * @brief Deletes a prepared GLWEGadget
