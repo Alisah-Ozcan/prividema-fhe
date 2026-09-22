@@ -65,7 +65,7 @@ Test(gpu_glwegadget_automorphism, cpu_baseline_sanity)
 {
 	srand(7);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe             = new_glwe_params(NN, 1, KAPPA, 8, 0, NOISE_UNIFORM_POWER_OF_TWO);
@@ -130,7 +130,7 @@ Test(gpu_glwegadget_automorphism, matches_cpu_no_noise)
 {
 	srand(7);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe             = new_glwe_params(NN, 1, KAPPA, 8, 0, NOISE_UNIFORM_POWER_OF_TWO);
@@ -204,7 +204,7 @@ Test(gpu_glwegadget_automorphism, ksk_gpu_prepared_from_raw_matches_cpu)
 {
 	srand(11);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe             = new_glwe_params(NN, 1, KAPPA, 8, 0, NOISE_UNIFORM_POWER_OF_TWO);
@@ -286,7 +286,7 @@ Test(gpu_glwegadget_automorphism, matches_cpu_on_pushed_stream)
 {
 	srand(13);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe             = new_glwe_params(NN, 1, KAPPA, 8, 0, NOISE_UNIFORM_POWER_OF_TWO);
@@ -361,7 +361,7 @@ Test(gpu_glwegadget_automorphism, ggsw_ksk_gpu_prepared_from_raw_matches_cpu)
 {
 	srand(17);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe = new_glwe_params(NN, 1, KAPPA, 8, 0, NOISE_UNIFORM_POWER_OF_TWO);
@@ -458,7 +458,7 @@ Test(gpu_glwegadget_automorphism, half_prod_device_does_not_overflow_smaller_res
 {
 	srand(19);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	// KSK's own params_glwe: MORE limbs (16) than the result's (12) — mirrors
@@ -545,7 +545,7 @@ Test(gpu_glwegadget_automorphism, source_smaller_than_ksk_matches_cpu)
 {
 	srand(23);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	// KSK + result: 16-limb precision. Source glwe being transformed: 12-limb

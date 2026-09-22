@@ -28,7 +28,7 @@ Test(gpu_vec_znx_arith, add_gpu_matches_cpu)
 {
 	srand(42);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
@@ -66,7 +66,7 @@ Test(gpu_vec_znx_arith, sub_gpu_matches_cpu)
 {
 	srand(43);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
@@ -104,7 +104,7 @@ Test(gpu_vec_znx_arith, negate_gpu_matches_cpu)
 {
 	srand(44);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
@@ -164,7 +164,7 @@ Test(gpu_vec_znx_arith, add_gpu_matches_cpu_on_pushed_stream)
 {
 	srand(45);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
@@ -222,7 +222,7 @@ Test(gpu_vec_znx_arith, add_sub_sized_device_matches_cpu_mismatched_sizes)
 {
 	srand(51);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	size_t a_size   = 5;
@@ -290,7 +290,7 @@ Test(gpu_vec_znx_arith, normalize_sized_device_matches_cpu_mismatched_sizes)
 	srand(53);
 	uint64_t kappa = 6;
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	// Case 1: a_size(8) > res_size(5) — truncating (carry still propagates

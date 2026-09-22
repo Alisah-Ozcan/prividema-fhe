@@ -26,7 +26,7 @@ Test(gpu_vec_znx_rotate, rotate_gpu_matches_cpu)
 {
 	srand(42);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
@@ -65,7 +65,7 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu)
 {
 	srand(43);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
@@ -109,7 +109,7 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu_strided_source)
 {
 	srand(44);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	// Interleaved buffer: limb i, poly j lives at [i*PACKS*n + j*n, +n)
@@ -151,7 +151,7 @@ Test(gpu_vec_znx_rotate, rotate_gpu_matches_cpu_strided_dest)
 {
 	srand(45);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
@@ -203,7 +203,7 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu_on_pushed_stream)
 {
 	srand(46);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
@@ -271,7 +271,7 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu_zero_pads_tail)
 {
 	srand(47);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L_SMALL * POLY_SIZE];

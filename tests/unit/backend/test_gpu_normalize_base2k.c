@@ -46,7 +46,7 @@ Test(gpu_normalize, base2k_gpu_matches_cpu)
 {
 	srand(42);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	// Input coefficients in [-100, 100] — normalization required

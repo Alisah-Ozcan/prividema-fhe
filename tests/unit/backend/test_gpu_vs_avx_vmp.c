@@ -41,7 +41,7 @@ Test(gpu_vs_avx_vmp, vmp_results_match)
 	gpu_ntt_vmp(A_flat, M_flat, C_gpu, POLY_SIZE, NROWS, NCOLS);
 
 	// AVX / spqlios VMP
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	MatBivDFT* pmat = (MatBivDFT*)pvda_new_vmp_pmat(module, NROWS, NCOLS);

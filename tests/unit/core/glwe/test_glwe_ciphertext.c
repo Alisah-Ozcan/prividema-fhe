@@ -458,6 +458,7 @@ PvdaParamTest(const_mult_glwe_dft, without_normalization, default_params_fn)
 PvdaParamTest(add_glwe, gpu_matches_cpu, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GLWE(param);
+	PVDA_USE_CUDA_BACKEND(module);
 
 	GLWECiphertext* glwe_lhs     = new_glwe(params_glwe);
 	GLWECiphertext* glwe_rhs     = new_glwe(params_glwe);
@@ -505,6 +506,7 @@ PvdaParamTest(add_glwe, gpu_matches_cpu, default_params_fn)
 PvdaParamTest(sub_glwe, gpu_matches_cpu, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GLWE(param);
+	PVDA_USE_CUDA_BACKEND(module);
 
 	GLWECiphertext* glwe_lhs     = new_glwe(params_glwe);
 	GLWECiphertext* glwe_rhs     = new_glwe(params_glwe);
@@ -553,6 +555,7 @@ PvdaParamTest(sub_glwe, gpu_matches_cpu, default_params_fn)
 PvdaParamTest(normalize_glwe, gpu_matches_cpu, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GLWE(param);
+	PVDA_USE_CUDA_BACKEND(module);
 
 	GLWECiphertext* glwe          = new_glwe(params_glwe);
 	GLWECiphertext* norm_expected = new_glwe(params_glwe);

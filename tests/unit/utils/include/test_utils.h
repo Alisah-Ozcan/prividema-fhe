@@ -82,6 +82,20 @@ double generate_sigma(PvdaTstParams* p);
 
 #define DELETE_PVDA_PARAMS_BASE    pvda_delete_backend(module);
 
+/**
+ * Replaces the test's (spqlios) backend `module` by a CUDA backend of the same N, for tests of
+ * the GPU paths. Host-side calls (encryption, decryption) keep running on the CPU, through the
+ * CUDA backend's embedded spqlios backend.
+ */
+#define PVDA_USE_CUDA_BACKEND(module)                                 \
+	do                                                                \
+	{                                                                 \
+		uint64_t _pvda_nn = pvda_module_extract_nn(module);           \
+		pvda_delete_backend(module);                                  \
+		(module) = pvda_new_cuda_backend((int)_pvda_nn);              \
+		cr_assert_not_null((module), "pvda_new_cuda_backend failed"); \
+	} while (0)
+
 #define INIT_PVDA_PARAMS_GLWE(PRS)                                                                                  \
 	INIT_PVDA_PARAMS_BASE((PRS))                                                                                    \
 	double sigma            = generate_sigma((PRS));                                                                \

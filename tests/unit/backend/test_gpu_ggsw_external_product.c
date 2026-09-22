@@ -71,7 +71,7 @@ Test(gpu_ggsw_ep, gpu_matches_cpu)
 	// CPU external product (reference)
 	// ---------------------------------------------------------------------------
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWECiphertext* cpu_result = new_glwe(params_glwe);

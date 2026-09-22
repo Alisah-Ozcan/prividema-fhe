@@ -33,7 +33,7 @@ Test(gpu_vs_avx, poly_mult_results_match)
 	gpu_ntt_svp(A, B, C_gpu, POLY_SIZE, 1);
 
 	// AVX / spqlios FFT multiplication
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	PolyUnivDFT* a_ppol = pvda_new_svp_ppol(module);
@@ -84,7 +84,7 @@ Test(gpu_vs_avx, poly_mult_batch_results_match)
 	gpu_ntt_svp(A, B_buf, C_gpu, POLY_SIZE, BATCH);
 
 	// AVX / spqlios FFT batch multiplication
-	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	PvdaBackend* module = pvda_new_cuda_backend(POLY_SIZE);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	PolyUnivDFT* a_ppol = pvda_new_svp_ppol(module);

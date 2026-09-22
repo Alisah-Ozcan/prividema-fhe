@@ -48,7 +48,7 @@ Test(gpu_trace_expand, matches_cpu_no_noise)
 {
 	srand(23);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe             = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
@@ -158,7 +158,7 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_matches_cpu)
 {
 	srand(29);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe             = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
@@ -249,7 +249,7 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_ggsw_matches_cpu)
 {
 	srand(31);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
@@ -364,7 +364,7 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_mismatched_params_matches_
 {
 	srand(37);
 
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_in  = new_glwe_params(NN, 1, KAPPA, 16, 0, NOISE_UNIFORM_POWER_OF_TWO);

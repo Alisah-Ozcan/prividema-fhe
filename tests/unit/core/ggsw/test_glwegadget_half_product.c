@@ -328,6 +328,7 @@ PvdaParamTest(glwegadget_half_product_prepared_to_dft, without_error, default_pa
 PvdaParamTest(glwegadget_half_product, gpu_without_error, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GGSWGAD(param);
+	PVDA_USE_CUDA_BACKEND(module);
 
 	sigma                             = 0;
 	params_glwe->fast_uniform_nb_bits = 0;
@@ -416,6 +417,7 @@ PvdaParamTest(glwegadget_half_product, gpu_without_error, default_params_fn)
 PvdaParamTest(glwegadget_half_product_dft_to_dft, gpu_without_error, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GGSWGAD(param);
+	PVDA_USE_CUDA_BACKEND(module);
 
 	sigma                             = 0;
 	params_glwe->fast_uniform_nb_bits = 0;
@@ -516,6 +518,7 @@ PvdaParamTest(glwegadget_half_product_dft_to_dft, gpu_without_error, default_par
 PvdaParamTest(glwegadget_half_product_prepared_to_dft, gpu_without_error, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GGSWGAD(param);
+	PVDA_USE_CUDA_BACKEND(module);
 
 	sigma                             = 0;
 	params_glwe->fast_uniform_nb_bits = 0;

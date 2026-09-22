@@ -405,6 +405,7 @@ PvdaParamTest(hebits_cmux_tree, normal, default_params_fn)
 PvdaParamTest(hebits_cmux, gpu_matches_cpu, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GGSW(param);
+	PVDA_USE_CUDA_BACKEND(module);
 
 	params_glwe->fast_uniform_nb_bits = 0;
 	sigma                             = 0;
@@ -508,6 +509,7 @@ PvdaParamTest(hebits_cmux, gpu_matches_cpu, default_params_fn)
 PvdaParamTest(hebits_cmux_unprepared, gpu_matches_cpu, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GGSW(param);
+	PVDA_USE_CUDA_BACKEND(module);
 
 	params_glwe->fast_uniform_nb_bits = 0;
 	sigma                             = 0;
@@ -605,6 +607,7 @@ PvdaParamTest(hebits_cmux_unprepared, gpu_matches_cpu, default_params_fn)
 PvdaParamTest(hebits_cmux_tree, gpu_matches_cpu, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GGSW(param);
+	PVDA_USE_CUDA_BACKEND(module);
 
 	GLWESecretKey* sk_ggsw              = alloc_glwe_secret_key(params_glwe);
 	GLWESecretKeyPrepared* sk_glwe_prep = alloc_glwe_secret_key_prepared(params_glwe);

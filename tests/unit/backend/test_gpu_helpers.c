@@ -29,7 +29,7 @@
 
 Test(gpu_helpers, glwe_upload_download_round_trip)
 {
-	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module = pvda_new_cuda_backend(NN);
 	GLWEParams* params  = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
 	GLWECiphertext* src = new_glwe(params);
 	GLWECiphertext* dst = new_glwe(params);
@@ -53,7 +53,7 @@ Test(gpu_helpers, glwe_upload_download_round_trip)
 
 Test(gpu_helpers, ggsw_and_glwegadget_upload)
 {
-	PvdaBackend* module          = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module          = pvda_new_cuda_backend(NN);
 	GLWEParams* params           = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
 	GGSWParams* ggsw_params      = new_ggsw_params(params, 1, KAPPA, LIMBS);
 	GLWEGadgetParams* gad_params = new_glwegadget_params(params, KAPPA, LIMBS / 2);
@@ -96,7 +96,7 @@ Test(gpu_helpers, glwe_dft_device_alloc_and_delete)
 Test(gpu_helpers, automorphism_key_device_matches_cpu)
 {
 	srand(7);
-	PvdaBackend* module          = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module          = pvda_new_cuda_backend(NN);
 	GLWEParams* params           = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
 	params->fast_uniform_nb_bits = 0;
 	GLWEGadgetParams* gad_params = new_glwegadget_params(params, KAPPA, LIMBS / 2);
@@ -169,7 +169,7 @@ Test(gpu_helpers, automorphism_key_device_matches_cpu)
 // instead of letting the CPU or the GPU path dereference the other side.
 Test(gpu_helpers, mixed_operands_are_rejected)
 {
-	PvdaBackend* module          = pvda_new_spqlios_backend(NN);
+	PvdaBackend* module          = pvda_new_cuda_backend(NN);
 	GLWEParams* params           = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
 	GGSWParams* ggsw_params      = new_ggsw_params(params, 1, KAPPA, LIMBS);
 	GLWEGadgetParams* gad_params = new_glwegadget_params(params, KAPPA, LIMBS / 2);
