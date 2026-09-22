@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "backend/spqlios_alias.h"
+#include "backend/backend_arithmetic.h"
 #include "core/glwe/bivariate_polynomial.h"
 #include "gpu/host/normalize_host.h"
 
@@ -46,8 +46,8 @@ Test(gpu_normalize, base2k_gpu_matches_cpu)
 {
 	srand(42);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	// Input coefficients in [-100, 100] — normalization required
 	static int64_t a_flat[L * POLY_SIZE];
@@ -76,7 +76,7 @@ Test(gpu_normalize, base2k_gpu_matches_cpu)
 		}
 	}
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------

@@ -154,12 +154,12 @@ if(ENABLE_CUDA)
       ${PROJECT_SOURCE_DIR}/include/backend
   )
 
-  # test_tfhe also has an #ifdef ENABLE_CUDA GPU variant (tfhe_cmux, inherited from the
+  # test_hebits also has an #ifdef ENABLE_CUDA GPU variant (hebits_cmux, inherited from the
   # GPU dispatch of sub_glwe/normalize_glwe/ggsw_external_product/add_glwe) — add GPU
   # linking to that specific target (already created by BuildUnitTests above).
-  target_link_libraries(test_tfhe PRIVATE PVDA_GPU CUDA::cudart)
-  target_compile_definitions(test_tfhe PRIVATE ENABLE_CUDA)
-  target_include_directories(test_tfhe PRIVATE
+  target_link_libraries(test_hebits PRIVATE PVDA_GPU CUDA::cudart)
+  target_compile_definitions(test_hebits PRIVATE ENABLE_CUDA)
+  target_include_directories(test_hebits PRIVATE
       ${PROJECT_SOURCE_DIR}/include/backend
   )
 

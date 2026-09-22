@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "backend/spqlios_alias.h"
+#include "backend/backend_arithmetic.h"
 #include "core/glwe/bivariate_polynomial.h"
 #include "gpu/common/gpu_nttparameters.h"
 #include "gpu/host/ntt_poly_mult_host.h"
@@ -41,8 +41,8 @@ Test(gpu_vs_avx_vmp, vmp_results_match)
 	gpu_ntt_vmp(A_flat, M_flat, C_gpu, POLY_SIZE, NROWS, NCOLS);
 
 	// AVX / spqlios VMP
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	MatBivDFT* pmat = (MatBivDFT*)pvda_new_vmp_pmat(module, NROWS, NCOLS);
 	cr_assert_not_null(pmat, "pmat allocation failed");
@@ -72,7 +72,7 @@ Test(gpu_vs_avx_vmp, vmp_results_match)
 		}
 	}
 
-	pvda_delete_vmp_pmat((double*)pmat);
-	pvda_delete_vec_znx_dft(res_dft);
-	pvda_delete_module_info(module);
+	pvda_delete_vmp_pmat(module, (double*)pmat);
+	pvda_delete_vec_znx_dft(module, res_dft);
+	pvda_delete_backend(module);
 }

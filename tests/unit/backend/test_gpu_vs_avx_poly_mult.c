@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "backend/spqlios_alias.h"
+#include "backend/backend_arithmetic.h"
 #include "core/glwe/bivariate_polynomial.h"
 #include "gpu/common/gpu_nttparameters.h"
 #include "gpu/host/ntt_poly_mult_host.h"
@@ -33,8 +33,8 @@ Test(gpu_vs_avx, poly_mult_results_match)
 	gpu_ntt_svp(A, B, C_gpu, POLY_SIZE, 1);
 
 	// AVX / spqlios FFT multiplication
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	PolyUnivDFT* a_ppol = pvda_new_svp_ppol(module);
 	cr_assert_not_null(a_ppol, "svp_ppol allocation failed");
@@ -58,9 +58,9 @@ Test(gpu_vs_avx, poly_mult_results_match)
 		             (long long)C_avx[i]);
 	}
 
-	pvda_delete_svp_ppol(a_ppol);
-	pvda_delete_vec_znx_dft(res_dft);
-	pvda_delete_module_info(module);
+	pvda_delete_svp_ppol(module, a_ppol);
+	pvda_delete_vec_znx_dft(module, res_dft);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -84,8 +84,8 @@ Test(gpu_vs_avx, poly_mult_batch_results_match)
 	gpu_ntt_svp(A, B_buf, C_gpu, POLY_SIZE, BATCH);
 
 	// AVX / spqlios FFT batch multiplication
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	PolyUnivDFT* a_ppol = pvda_new_svp_ppol(module);
 	cr_assert_not_null(a_ppol, "svp_ppol allocation failed");
@@ -112,7 +112,7 @@ Test(gpu_vs_avx, poly_mult_batch_results_match)
 		}
 	}
 
-	pvda_delete_svp_ppol(a_ppol);
-	pvda_delete_vec_znx_dft(res_dft);
-	pvda_delete_module_info(module);
+	pvda_delete_svp_ppol(module, a_ppol);
+	pvda_delete_vec_znx_dft(module, res_dft);
+	pvda_delete_backend(module);
 }

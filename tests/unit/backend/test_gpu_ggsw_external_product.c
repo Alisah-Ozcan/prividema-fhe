@@ -71,8 +71,8 @@ Test(gpu_ggsw_ep, gpu_matches_cpu)
 	// CPU external product (reference)
 	// ---------------------------------------------------------------------------
 
-	MODULE* module = pvda_new_module_info(NN);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWECiphertext* cpu_result = new_glwe(params_glwe);
 	cr_assert_not_null(cpu_result, "cpu_result allocation failed");
@@ -130,5 +130,5 @@ Test(gpu_ggsw_ep, gpu_matches_cpu)
 	delete_ggsw(cpu_ggsw);
 	delete_glwe_params(params_glwe);
 	delete_ggsw_params(params_ggsw);
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }

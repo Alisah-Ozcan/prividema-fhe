@@ -396,13 +396,13 @@ PvdaParamTest(hebits_cmux_tree, normal, default_params_fn)
 
 #ifdef ENABLE_CUDA
 /**
- * @brief tfhe_cmux has no GPU-specific code of its own: it is built from sub_glwe,
+ * @brief hebits_cmux has no GPU-specific code of its own: it is built from sub_glwe,
  * normalize_glwe, ggsw_external_product and add_glwe, each of which dispatches to
  * the GPU (via pvda_is_device_pointer) when given device pointers. This test drives
  * the whole CMux gate with device-resident ciphertexts and checks the result matches
  * the CPU path bit-for-bit, for both selection cases (0 -> c0, 1 -> c1).
  */
-PvdaParamTest(tfhe_cmux, gpu_matches_cpu, default_params_fn)
+PvdaParamTest(hebits_cmux, gpu_matches_cpu, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GGSW(param);
 
@@ -428,8 +428,8 @@ PvdaParamTest(tfhe_cmux, gpu_matches_cpu, default_params_fn)
 	uniform_glwe_secret_key(module, sk_ggsw, 3);
 	glwe_sk_prepare(module, sk_glwe_prep, sk_ggsw);
 
-	uniform_random_pol_znx(m1, params_glwe->nn, 62);
-	uniform_random_pol_znx(m2, params_glwe->nn, 62);
+	uniform_pow2_random_pol_znx(module, m1, params_glwe->nn, 62);
+	uniform_pow2_random_pol_znx(module, m2, params_glwe->nn, 62);
 
 	glwe_secret_encrypt_tnx(module, glwe1, sk_glwe_prep, m1);
 	glwe_secret_encrypt_tnx(module, glwe2, sk_glwe_prep, m2);
@@ -437,8 +437,8 @@ PvdaParamTest(tfhe_cmux, gpu_matches_cpu, default_params_fn)
 	gpu_ntt_initialize(params_glwe->nn);
 	size_t total = glwe_coef_number(params_glwe);
 
-	// Case 0: selection signal 0 -> tfhe_cmux should select glwe1 (c0)
-	// Case 1: selection signal 1 -> tfhe_cmux should select glwe2 (c1)
+	// Case 0: selection signal 0 -> hebits_cmux should select glwe1 (c0)
+	// Case 1: selection signal 1 -> hebits_cmux should select glwe2 (c1)
 	for (int sel_bit = 0; sel_bit < 2; ++sel_bit)
 	{
 		memset(m_sel, 0, poly_univ_bytes(params_glwe));
@@ -447,11 +447,11 @@ PvdaParamTest(tfhe_cmux, gpu_matches_cpu, default_params_fn)
 		ggsw_prepare(module, ggsw_prep, ggsw);
 
 		// CPU reference (host pointers -> CPU path throughout)
-		int ret = tfhe_cmux(module, res_expected, glwe1, glwe2, ggsw_prep, 1);
-		cr_assert_eq(ret, 0, "tfhe_cmux (CPU) failed");
+		int ret = hebits_cmux(module, res_expected, glwe1, glwe2, ggsw_prep, 1);
+		cr_assert_eq(ret, 0, "hebits_cmux (CPU) failed");
 
 		// GPU: upload everything, prepare the GGSW on device, run CMux entirely
-		// through device pointers (same tfhe_cmux entry point).
+		// through device pointers (same hebits_cmux entry point).
 		GLWECiphertext gpu_glwe1 = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe1)};
 		GLWECiphertext gpu_glwe2 = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe2)};
 		GLWECiphertext gpu_res   = {.params = params_glwe, .vec = pvda_gpu_alloc(total)};
@@ -466,8 +466,8 @@ PvdaParamTest(tfhe_cmux, gpu_matches_cpu, default_params_fn)
 		cr_assert_not_null(gpu_ggsw.mat, "pvda_ggsw_to_device failed");
 		cr_assert_not_null(gpu_ggsw_prep.mat, "ggsw_prepare (GPU) failed");
 
-		ret = tfhe_cmux(module, &gpu_res, &gpu_glwe1, &gpu_glwe2, &gpu_ggsw_prep, 1);
-		cr_assert_eq(ret, 0, "tfhe_cmux (GPU) failed");
+		ret = hebits_cmux(module, &gpu_res, &gpu_glwe1, &gpu_glwe2, &gpu_ggsw_prep, 1);
+		cr_assert_eq(ret, 0, "hebits_cmux (GPU) failed");
 		pvda_glwe_from_device(res_from_gpu, gpu_res.vec);
 
 		for (uint64_t t = 0; t < total; t++) cr_assert(eq(i64, res_from_gpu->vec[t], res_expected->vec[t]));
@@ -499,13 +499,13 @@ PvdaParamTest(tfhe_cmux, gpu_matches_cpu, default_params_fn)
 }
 
 /**
- * @brief Same as tfhe_cmux::gpu_matches_cpu but for tfhe_cmux_unprepared, which takes
+ * @brief Same as hebits_cmux::gpu_matches_cpu but for hebits_cmux_unprepared, which takes
  * a raw (un-prepared) GGSWCiphertext and dispatches through sub_glwe / normalize_glwe /
  * ggsw_unprepared_external_product / add_glwe. ggsw_unprepared_external_product does its
- * own NTT preparation on every call, so — unlike tfhe_cmux — there is no separate
+ * own NTT preparation on every call, so — unlike hebits_cmux — there is no separate
  * ggsw_prepare / GGSWCiphertextPrep step: the raw uploaded GGSW matrix is used directly.
  */
-PvdaParamTest(tfhe_cmux_unprepared, gpu_matches_cpu, default_params_fn)
+PvdaParamTest(hebits_cmux_unprepared, gpu_matches_cpu, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GGSW(param);
 
@@ -530,8 +530,8 @@ PvdaParamTest(tfhe_cmux_unprepared, gpu_matches_cpu, default_params_fn)
 	uniform_glwe_secret_key(module, sk_ggsw, 3);
 	glwe_sk_prepare(module, sk_glwe_prep, sk_ggsw);
 
-	uniform_random_pol_znx(m1, params_glwe->nn, 62);
-	uniform_random_pol_znx(m2, params_glwe->nn, 62);
+	uniform_pow2_random_pol_znx(module, m1, params_glwe->nn, 62);
+	uniform_pow2_random_pol_znx(module, m2, params_glwe->nn, 62);
 
 	glwe_secret_encrypt_tnx(module, glwe1, sk_glwe_prep, m1);
 	glwe_secret_encrypt_tnx(module, glwe2, sk_glwe_prep, m2);
@@ -539,8 +539,8 @@ PvdaParamTest(tfhe_cmux_unprepared, gpu_matches_cpu, default_params_fn)
 	gpu_ntt_initialize(params_glwe->nn);
 	size_t total = glwe_coef_number(params_glwe);
 
-	// Case 0: selection signal 0 -> tfhe_cmux_unprepared should select glwe1 (c0)
-	// Case 1: selection signal 1 -> tfhe_cmux_unprepared should select glwe2 (c1)
+	// Case 0: selection signal 0 -> hebits_cmux_unprepared should select glwe1 (c0)
+	// Case 1: selection signal 1 -> hebits_cmux_unprepared should select glwe2 (c1)
 	for (int sel_bit = 0; sel_bit < 2; ++sel_bit)
 	{
 		memset(m_sel, 0, poly_univ_bytes(params_glwe));
@@ -548,11 +548,11 @@ PvdaParamTest(tfhe_cmux_unprepared, gpu_matches_cpu, default_params_fn)
 		ggsw_secret_encrypt(module, ggsw, sk_glwe_prep, m_sel);
 
 		// CPU reference (host pointers -> CPU path throughout)
-		int ret = tfhe_cmux_unprepared(module, res_expected, glwe1, glwe2, ggsw, 1);
-		cr_assert_eq(ret, 0, "tfhe_cmux_unprepared (CPU) failed");
+		int ret = hebits_cmux_unprepared(module, res_expected, glwe1, glwe2, ggsw, 1);
+		cr_assert_eq(ret, 0, "hebits_cmux_unprepared (CPU) failed");
 
 		// GPU: upload everything, run CMux entirely through device pointers
-		// (same tfhe_cmux_unprepared entry point, raw GGSW — no prepare step).
+		// (same hebits_cmux_unprepared entry point, raw GGSW — no prepare step).
 		GLWECiphertext gpu_glwe1 = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe1)};
 		GLWECiphertext gpu_glwe2 = {.params = params_glwe, .vec = pvda_glwe_to_device(glwe2)};
 		GLWECiphertext gpu_res   = {.params = params_glwe, .vec = pvda_gpu_alloc(total)};
@@ -563,8 +563,8 @@ PvdaParamTest(tfhe_cmux_unprepared, gpu_matches_cpu, default_params_fn)
 		cr_assert_not_null(gpu_res.vec, "pvda_gpu_alloc failed");
 		cr_assert_not_null(gpu_ggsw.mat, "pvda_ggsw_to_device failed");
 
-		ret = tfhe_cmux_unprepared(module, &gpu_res, &gpu_glwe1, &gpu_glwe2, &gpu_ggsw, 1);
-		cr_assert_eq(ret, 0, "tfhe_cmux_unprepared (GPU) failed");
+		ret = hebits_cmux_unprepared(module, &gpu_res, &gpu_glwe1, &gpu_glwe2, &gpu_ggsw, 1);
+		cr_assert_eq(ret, 0, "hebits_cmux_unprepared (GPU) failed");
 		pvda_glwe_from_device(res_from_gpu, gpu_res.vec);
 
 		for (uint64_t t = 0; t < total; t++) cr_assert(eq(i64, res_from_gpu->vec[t], res_expected->vec[t]));
@@ -594,15 +594,15 @@ PvdaParamTest(tfhe_cmux_unprepared, gpu_matches_cpu, default_params_fn)
 }
 
 /**
- * @brief Same as tfhe_cmux::gpu_matches_cpu but for tfhe_cmux_tree. tfhe_cmux_tree has no
+ * @brief Same as hebits_cmux::gpu_matches_cpu but for hebits_cmux_tree. hebits_cmux_tree has no
  * GPU-specific code of its own beyond allocating its intermediate nodes on the device
- * when its leaf inputs already are (see tfhe_cmux_tree_new_node / pvda_new_glwe_device in
- * tfhe.c) — the CMux gates themselves still run through tfhe_cmux's own GPU dispatch.
+ * when its leaf inputs already are (see hebits_cmux_tree_new_node / pvda_new_glwe_device in
+ * tfhe.c) — the CMux gates themselves still run through hebits_cmux's own GPU dispatch.
  * Uploads every leaf GLWE and both selector GGSWs once, then runs the whole binary tree
  * for a handful of selection values, checking the GPU result matches the CPU path
  * bit-for-bit.
  */
-PvdaParamTest(tfhe_cmux_tree, gpu_matches_cpu, default_params_fn)
+PvdaParamTest(hebits_cmux_tree, gpu_matches_cpu, default_params_fn)
 {
 	INIT_PVDA_PARAMS_GGSW(param);
 
@@ -633,7 +633,7 @@ PvdaParamTest(tfhe_cmux_tree, gpu_matches_cpu, default_params_fn)
 		ms[i] = new_univ_tnx(params_glwe);
 		memset(ms[i], 0, poly_univ_tnx_bytes(params_glwe));
 		glwes[i] = new_glwe(params_glwe);
-		uniform_random_pol_znx(ms[i], params_glwe->nn, 64);
+		uniform_pow2_random_pol_znx(module, ms[i], params_glwe->nn, 64);
 		glwe_secret_encrypt_tnx(module, glwes[i], sk_glwe_prep, ms[i]);
 	}
 
@@ -686,19 +686,19 @@ PvdaParamTest(tfhe_cmux_tree, gpu_matches_cpu, default_params_fn)
 		sel = selections[i];
 
 		// CPU reference (host pointers -> CPU path throughout).
-		int ret = tfhe_cmux_tree(module, res_expected, (const GLWECiphertext**)glwes, num_msgs,
+		int ret = hebits_cmux_tree(module, res_expected, (const GLWECiphertext**)glwes, num_msgs,
 		                         (const GGSWCiphertextPrep**)selector, msgs_log2, 0);
-		cr_assert_eq(ret, 0, "tfhe_cmux_tree (CPU) failed");
+		cr_assert_eq(ret, 0, "hebits_cmux_tree (CPU) failed");
 		normalize_glwe(module, res_expected, res_expected);
 
-		// GPU: same tfhe_cmux_tree entry point, device-resident leaves/selectors/result —
-		// intermediate tree nodes are allocated on the device by tfhe_cmux_tree itself.
+		// GPU: same hebits_cmux_tree entry point, device-resident leaves/selectors/result —
+		// intermediate tree nodes are allocated on the device by hebits_cmux_tree itself.
 		GLWECiphertext gpu_res = {.params = params_glwe, .vec = pvda_gpu_alloc(total)};
 		cr_assert_not_null(gpu_res.vec, "pvda_gpu_alloc failed");
 
-		ret = tfhe_cmux_tree(module, &gpu_res, (const GLWECiphertext**)gpu_glwes, num_msgs,
+		ret = hebits_cmux_tree(module, &gpu_res, (const GLWECiphertext**)gpu_glwes, num_msgs,
 		                     (const GGSWCiphertextPrep**)selector_gpu, msgs_log2, 0);
-		cr_assert_eq(ret, 0, "tfhe_cmux_tree (GPU) failed");
+		cr_assert_eq(ret, 0, "hebits_cmux_tree (GPU) failed");
 		normalize_glwe(module, &gpu_res, &gpu_res);
 		pvda_glwe_from_device(res_from_gpu, gpu_res.vec);
 

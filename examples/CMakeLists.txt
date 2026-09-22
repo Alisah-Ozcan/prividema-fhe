@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 # Collect all example source files — GPU-specific ones (*_gpu*.c, e.g.
-# exemples_PIR_gpu.c / exemples_PIR_gpu_stream.c) are built separately below,
+# example_PIR_gpu.c / example_PIR_gpu_stream.c) are built separately below,
 # only when ENABLE_CUDA is set, since they call GPU functions directly.
 file(GLOB TEST_FILES *.c)
 list(FILTER TEST_FILES EXCLUDE REGEX ".*_gpu.*\\.c$")

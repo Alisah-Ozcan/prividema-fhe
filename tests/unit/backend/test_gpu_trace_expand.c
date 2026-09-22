@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "backend/rng.h"
-#include "backend/spqlios_alias.h"
+#include "backend/backend_arithmetic.h"
 #include "core/ggsw/ggsw_arithmetic.h"
 #include "core/ggsw/ggsw_ciphertext.h"
 #include "core/ggsw/ggsw_key.h"
@@ -25,6 +25,7 @@
 #include "ggsw_utils.h"
 #include "glwegadget_utils.h"
 #include "gpu/host/ggsw_external_product_gpu.h"
+#include "math_utils.h"
 #include "maths_structures.h"
 #include "test_utils.h"
 #include "utils.h"
@@ -36,7 +37,7 @@
 // tests/unit/core/ggsw/test_trace_expand.c's `trace_expand, no_noise` CPU
 // test almost line for line, swapped to an all-device glwe_ct/results[]/KSK
 // operand set (KSKs GPU-NTT-prepared the same way onionpir_client_phase0
-// does, via pvda_new_glwegadget_prep_device + prepare_automorphism_key's
+// does, via pvda_new_glwegadget_prep_device + compute_automorphism_key's
 // device dispatch).
 
 #define NN    1024
@@ -47,8 +48,8 @@ Test(gpu_trace_expand, matches_cpu_no_noise)
 {
 	srand(23);
 
-	MODULE* module = pvda_new_module_info(NN);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe             = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
 	params_glwe->fast_uniform_nb_bits   = 0;
@@ -61,18 +62,18 @@ Test(gpu_trace_expand, matches_cpu_no_noise)
 
 	// GPU-prepared automorphism KSK collection — same pattern as
 	// onionpir_client_phase0's make_automorphism_ksk_device fix.
-	GLWEAutomorphismKSKCollection* ksks = new_automorphism_ksk_collection(2 * NN);
+	GLWEAutomorphismKeyCollection* ksks = new_automorphism_key_collection(2 * NN);
 	for (uint64_t i = 1; (1ULL << i) <= NN; ++i)
 	{
 		int64_t p                = (int64_t)NN / (1LL << (i - 1)) + 1;
-		GLWEAutomorphismKSK* ksk = new_automorphism_ksk(params_glwegadget);
-		delete_glwegadget_prep(ksk->enc_s[0]);
-		ksk->enc_s[0] = pvda_new_glwegadget_prep_device(params_glwegadget);
-		int pc        = prepare_automorphism_key(module, ksk, sk_prep, (int)p);
-		cr_assert_eq(pc, 0, "prepare_automorphism_key (GPU) failed for p=%lld", (long long)p);
-		cr_assert(pvda_is_device_pointer(ksk->enc_s[0]->mat), "expected enc_s[0]->mat device-resident for p=%lld",
+		GLWEAutomorphismKey* ksk = new_automorphism_key(params_glwegadget);
+		delete_glwegadget_prep(ksk->glwe_ksk->enc_s[0]);
+		ksk->glwe_ksk->enc_s[0] = pvda_new_glwegadget_prep_device(params_glwegadget);
+		int pc        = compute_automorphism_key(module, ksk, sk_prep, (int)p);
+		cr_assert_eq(pc, 0, "compute_automorphism_key (GPU) failed for p=%lld", (long long)p);
+		cr_assert(pvda_is_device_pointer(ksk->glwe_ksk->enc_s[0]->mat), "expected enc_s[0]->mat device-resident for p=%lld",
 		          (long long)p);
-		glwegadget_ksk_collection_put_key(ksks, ksk, p);
+		glwegadget_key_collection_put_key(ksks, ksk, p);
 	}
 
 	PolyUnivRnX* m_univ_rnx     = new_univ_rnx(params_glwe);
@@ -92,7 +93,7 @@ Test(gpu_trace_expand, matches_cpu_no_noise)
 		int bund = bundled[bi];
 
 		memset(m_univ_rnx, 0, poly_univ_bytes(params_glwe));
-		rnx_random_vec(tmp_rnx, params_glwe);
+		rnx_random_vec(module, tmp_rnx, params_glwe);
 		for (int i = 0; i < bund; ++i) m_univ_rnx[i] = tmp_rnx[i];
 
 		glwe_secret_encrypt_rnx(module, glwe_ct, sk_prep, m_univ_rnx);
@@ -113,7 +114,7 @@ Test(gpu_trace_expand, matches_cpu_no_noise)
 			pvda_glwe_from_device(result_host, (const int64_t*)results[i]->vec);
 
 			glwe_secret_decrypt(module, biv_tmp, sk_prep, result_host);
-			biv_to_univ_rnx(params_glwe, m_observed_rnx, biv_tmp);
+			biv_to_univ_rnx(params_glwe, m_observed_rnx, biv_tmp, 0);
 
 			double expected = factor * m_univ_rnx[i];
 			double actual   = m_observed_rnx[0];
@@ -130,7 +131,7 @@ Test(gpu_trace_expand, matches_cpu_no_noise)
 		pvda_gpu_free(d_glwe_ct_vec);
 	}
 
-	delete_automorphism_ksk_collection(ksks, 1);
+	delete_automorphism_key_collection(ksks, 1);
 
 	delete_glwe_secret_key(sk);
 	delete_glwe_secret_key_prepared(sk_prep);
@@ -141,7 +142,7 @@ Test(gpu_trace_expand, matches_cpu_no_noise)
 	delete_univ_rnx(m_observed_rnx);
 	delete_glwe(glwe_ct);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 	delete_glwegadget_params(params_glwegadget);
 	delete_glwe_params(params_glwe);
 }
@@ -157,8 +158,8 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_matches_cpu)
 {
 	srand(29);
 
-	MODULE* module = pvda_new_module_info(NN);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe             = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
 	GLWEGadgetParams* params_glwegadget = new_glwegadget_params(params_glwe, KAPPA, LIMBS);
@@ -171,16 +172,16 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_matches_cpu)
 	uniform_glwe_secret_key(module, sk, 1);
 	glwe_sk_prepare(module, sk_prep, sk);
 
-	GLWEAutomorphismKSKCollection* ksks = new_automorphism_ksk_collection(2 * NN);
+	GLWEAutomorphismKeyCollection* ksks = new_automorphism_key_collection(2 * NN);
 	for (uint64_t i = 1; (1ULL << i) <= NN; ++i)
 	{
 		int64_t p                = (int64_t)NN / (1LL << (i - 1)) + 1;
-		GLWEAutomorphismKSK* ksk = new_automorphism_ksk(params_glwegadget);
-		delete_glwegadget_prep(ksk->enc_s[0]);
-		ksk->enc_s[0] = pvda_new_glwegadget_prep_device(params_glwegadget);
-		int pc        = prepare_automorphism_key(module, ksk, sk_prep, (int)p);
-		cr_assert_eq(pc, 0, "prepare_automorphism_key (GPU) failed for p=%lld", (long long)p);
-		glwegadget_ksk_collection_put_key(ksks, ksk, p);
+		GLWEAutomorphismKey* ksk = new_automorphism_key(params_glwegadget);
+		delete_glwegadget_prep(ksk->glwe_ksk->enc_s[0]);
+		ksk->glwe_ksk->enc_s[0] = pvda_new_glwegadget_prep_device(params_glwegadget);
+		int pc        = compute_automorphism_key(module, ksk, sk_prep, (int)p);
+		cr_assert_eq(pc, 0, "compute_automorphism_key (GPU) failed for p=%lld", (long long)p);
+		glwegadget_key_collection_put_key(ksks, ksk, p);
 	}
 
 	PolyUniv* m_univ        = new_univ(params_glwe);
@@ -194,7 +195,7 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_matches_cpu)
 		int bund = bundled[bi];
 
 		memset(m_univ, 0, poly_univ_bytes(params_glwe));
-		uniform_random_pol_znx(m_univ, bund, 1);
+		uniform_pow2_random_pol_znx(module, m_univ, bund, 1);
 
 		glwegadget_packed_secret_encrypt(module, glwe_ct, params_glwegadget, sk_prep, m_univ, bund);
 
@@ -226,13 +227,13 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_matches_cpu)
 		pvda_gpu_free(d_glwe_ct_vec);
 	}
 
-	delete_automorphism_ksk_collection(ksks, 1);
+	delete_automorphism_key_collection(ksks, 1);
 	delete_glwe_secret_key(sk);
 	delete_glwe_secret_key_prepared(sk_prep);
 	delete_univ(m_univ);
 	delete_glwe(glwe_ct);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 	delete_glwegadget_params(params_glwegadget);
 	delete_glwe_params(params_glwe);
 }
@@ -248,8 +249,8 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_ggsw_matches_cpu)
 {
 	srand(31);
 
-	MODULE* module = pvda_new_module_info(NN);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_glwe = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
 	GGSWParams* params_ggsw = new_ggsw_params(params_glwe, 1, KAPPA, LIMBS);
@@ -271,16 +272,16 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_ggsw_matches_cpu)
 	uniform_glwe_secret_key(module, sk, 1);
 	glwe_sk_prepare(module, sk_prep, sk);
 
-	GLWEAutomorphismKSKCollection* ksks = new_automorphism_ksk_collection(2 * NN);
+	GLWEAutomorphismKeyCollection* ksks = new_automorphism_key_collection(2 * NN);
 	for (uint64_t i = 1; (1ULL << i) <= NN; ++i)
 	{
 		int64_t p                = (int64_t)NN / (1LL << (i - 1)) + 1;
-		GLWEAutomorphismKSK* ksk = new_automorphism_ksk(params_glwegadget);
-		delete_glwegadget_prep(ksk->enc_s[0]);
-		ksk->enc_s[0] = pvda_new_glwegadget_prep_device(params_glwegadget);
-		int pc        = prepare_automorphism_key(module, ksk, sk_prep, (int)p);
-		cr_assert_eq(pc, 0, "prepare_automorphism_key (GPU) failed for p=%lld", (long long)p);
-		glwegadget_ksk_collection_put_key(ksks, ksk, p);
+		GLWEAutomorphismKey* ksk = new_automorphism_key(params_glwegadget);
+		delete_glwegadget_prep(ksk->glwe_ksk->enc_s[0]);
+		ksk->glwe_ksk->enc_s[0] = pvda_new_glwegadget_prep_device(params_glwegadget);
+		int pc        = compute_automorphism_key(module, ksk, sk_prep, (int)p);
+		cr_assert_eq(pc, 0, "compute_automorphism_key (GPU) failed for p=%lld", (long long)p);
+		glwegadget_key_collection_put_key(ksks, ksk, p);
 	}
 
 	GGSWCiphertextPrep** ggsw_ksks = calloc(k, sizeof(GGSWCiphertextPrep*));
@@ -303,7 +304,7 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_ggsw_matches_cpu)
 		int bund = bundled[bi];
 
 		memset(m_univ, 0, poly_univ_bytes(params_glwe));
-		uniform_random_pol_znx(m_univ, bund, 1);
+		uniform_pow2_random_pol_znx(module, m_univ, bund, 1);
 
 		glwegadget_packed_secret_encrypt(module, glwe_ct, params_glwegadget, sk_prep, m_univ, bund);
 
@@ -336,7 +337,7 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_ggsw_matches_cpu)
 		pvda_gpu_free(d_glwe_ct_vec);
 	}
 
-	delete_automorphism_ksk_collection(ksks, 1);
+	delete_automorphism_key_collection(ksks, 1);
 	for (uint64_t i = 0; i < k; ++i) delete_ggsw_prep(ggsw_ksks[i]);
 	free(ggsw_ksks);
 
@@ -345,7 +346,7 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_ggsw_matches_cpu)
 	delete_univ(m_univ);
 	delete_glwe(glwe_ct);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 	delete_ggsw_params(params_ggsw);
 	delete_glwegadget_params(params_glwegadget);
 	delete_glwe_params(params_glwe);
@@ -363,8 +364,8 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_mismatched_params_matches_
 {
 	srand(37);
 
-	MODULE* module = pvda_new_module_info(NN);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(NN);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	GLWEParams* params_in  = new_glwe_params(NN, 1, KAPPA, 16, 0, NOISE_UNIFORM_POWER_OF_TWO);
 	GLWEParams* params_out = new_glwe_params(NN, 1, KAPPA, 12, 0, NOISE_UNIFORM_POWER_OF_TWO);
@@ -378,16 +379,16 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_mismatched_params_matches_
 	uniform_glwe_secret_key(module, sk, 1);
 	glwe_sk_prepare(module, sk_prep, sk);
 
-	GLWEAutomorphismKSKCollection* ksks = new_automorphism_ksk_collection(2 * NN);
+	GLWEAutomorphismKeyCollection* ksks = new_automorphism_key_collection(2 * NN);
 	for (uint64_t i = 1; (1ULL << i) <= NN; ++i)
 	{
 		int64_t p                = (int64_t)NN / (1LL << (i - 1)) + 1;
-		GLWEAutomorphismKSK* ksk = new_automorphism_ksk(auto_ksk_params);
-		delete_glwegadget_prep(ksk->enc_s[0]);
-		ksk->enc_s[0] = pvda_new_glwegadget_prep_device(auto_ksk_params);
-		int pc        = prepare_automorphism_key(module, ksk, sk_prep, (int)p);
-		cr_assert_eq(pc, 0, "prepare_automorphism_key (GPU) failed for p=%lld", (long long)p);
-		glwegadget_ksk_collection_put_key(ksks, ksk, p);
+		GLWEAutomorphismKey* ksk = new_automorphism_key(auto_ksk_params);
+		delete_glwegadget_prep(ksk->glwe_ksk->enc_s[0]);
+		ksk->glwe_ksk->enc_s[0] = pvda_new_glwegadget_prep_device(auto_ksk_params);
+		int pc        = compute_automorphism_key(module, ksk, sk_prep, (int)p);
+		cr_assert_eq(pc, 0, "compute_automorphism_key (GPU) failed for p=%lld", (long long)p);
+		glwegadget_key_collection_put_key(ksks, ksk, p);
 	}
 
 	int bund = 16;
@@ -440,11 +441,11 @@ Test(gpu_trace_expand, packed_glwegadget_trace_expand_mismatched_params_matches_
 	delete_glwe(row_ct);
 	delete_univ(sel_row);
 
-	delete_automorphism_ksk_collection(ksks, 1);
+	delete_automorphism_key_collection(ksks, 1);
 	delete_glwe_secret_key(sk);
 	delete_glwe_secret_key_prepared(sk_prep);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 	delete_glwegadget_params(row_query_gad_params);
 	delete_glwegadget_params(auto_ksk_params);
 	delete_glwegadget_params(row_exp_gad_params);

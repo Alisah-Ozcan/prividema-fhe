@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "backend/spqlios_alias.h"
+#include "backend/backend_arithmetic.h"
 #include "core/glwe/bivariate_polynomial.h"
 #include "gpu/common/gpu_stream.h"
 #include "gpu/host/vec_znx_rotate_automorphism_host.h"
@@ -26,8 +26,8 @@ Test(gpu_vec_znx_rotate, rotate_gpu_matches_cpu)
 {
 	srand(42);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
 	for (int i = 0; i < L * POLY_SIZE; i++) a_flat[i] = (int64_t)(rand() % 2001) - 1000;
@@ -54,7 +54,7 @@ Test(gpu_vec_znx_rotate, rotate_gpu_matches_cpu)
 			             (long long)C_cpu[i], (long long)C_gpu[i]);
 	}
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -65,8 +65,8 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu)
 {
 	srand(43);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
 	for (int i = 0; i < L * POLY_SIZE; i++) a_flat[i] = (int64_t)(rand() % 2001) - 1000;
@@ -94,7 +94,7 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu)
 			             (long long)C_cpu[i], (long long)C_gpu[i]);
 	}
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -109,8 +109,8 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu_strided_source)
 {
 	srand(44);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	// Interleaved buffer: limb i, poly j lives at [i*PACKS*n + j*n, +n)
 	static int64_t interleaved[L * PACKS * POLY_SIZE];
@@ -138,7 +138,7 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu_strided_source)
 		cr_assert_eq(C_cpu[i], C_gpu[i], "mismatch at index %d: CPU=%lld GPU=%lld", i, (long long)C_cpu[i],
 		             (long long)C_gpu[i]);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,8 +151,8 @@ Test(gpu_vec_znx_rotate, rotate_gpu_matches_cpu_strided_dest)
 {
 	srand(45);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
 	for (int i = 0; i < L * POLY_SIZE; i++) a_flat[i] = (int64_t)(rand() % 2001) - 1000;
@@ -191,7 +191,7 @@ Test(gpu_vec_znx_rotate, rotate_gpu_matches_cpu_strided_dest)
 			cr_assert_eq(v, 424242, "gap at limb=%d poly=%d was clobbered: %lld", i, other, (long long)v);
 		}
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -203,8 +203,8 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu_on_pushed_stream)
 {
 	srand(46);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
 	for (int i = 0; i < L * POLY_SIZE; i++) a_flat[i] = (int64_t)(rand() % 2001) - 1000;
@@ -233,7 +233,7 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu_on_pushed_stream)
 	cr_assert_null(pvda_gpu_stream_get_active(), "pop did not restore the default stream");
 	pvda_gpu_stream_destroy(stream);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -271,8 +271,8 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu_zero_pads_tail)
 {
 	srand(47);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L_SMALL * POLY_SIZE];
 	for (int i = 0; i < L_SMALL * POLY_SIZE; i++) a_flat[i] = (int64_t)(rand() % 2001) - 1000;
@@ -302,5 +302,5 @@ Test(gpu_vec_znx_rotate, automorphism_gpu_matches_cpu_zero_pads_tail)
 	for (int i = L_SMALL * POLY_SIZE; i < L_BIG * POLY_SIZE; i++)
 		cr_assert_eq(C_gpu[i], 0LL, "tail limb at index %d must be zero-padded, got %lld", i, (long long)C_gpu[i]);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }

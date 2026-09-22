@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "backend/spqlios_alias.h"
+#include "backend/backend_arithmetic.h"
 #include "core/glwe/bivariate_polynomial.h"
 #include "gpu/common/gpu_stream.h"
 #include "gpu/host/ggsw_external_product_gpu.h"
@@ -28,8 +28,8 @@ Test(gpu_vec_znx_arith, add_gpu_matches_cpu)
 {
 	srand(42);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
 	static int64_t b_flat[L * POLY_SIZE];
@@ -55,7 +55,7 @@ Test(gpu_vec_znx_arith, add_gpu_matches_cpu)
 		cr_assert_eq(C_cpu[i], C_gpu[i], "Mismatch at index %d: CPU=%lld GPU=%lld", i, (long long)C_cpu[i],
 		             (long long)C_gpu[i]);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -66,8 +66,8 @@ Test(gpu_vec_znx_arith, sub_gpu_matches_cpu)
 {
 	srand(43);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
 	static int64_t b_flat[L * POLY_SIZE];
@@ -93,7 +93,7 @@ Test(gpu_vec_znx_arith, sub_gpu_matches_cpu)
 		cr_assert_eq(C_cpu[i], C_gpu[i], "Mismatch at index %d: CPU=%lld GPU=%lld", i, (long long)C_cpu[i],
 		             (long long)C_gpu[i]);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,8 +104,8 @@ Test(gpu_vec_znx_arith, negate_gpu_matches_cpu)
 {
 	srand(44);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
 	for (int i = 0; i < L * POLY_SIZE; i++) a_flat[i] = (int64_t)(rand() % 2001) - 1000;
@@ -125,7 +125,7 @@ Test(gpu_vec_znx_arith, negate_gpu_matches_cpu)
 		cr_assert_eq(C_cpu[i], C_gpu[i], "Mismatch at index %d: CPU=%lld GPU=%lld", i, (long long)C_cpu[i],
 		             (long long)C_gpu[i]);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,8 +164,8 @@ Test(gpu_vec_znx_arith, add_gpu_matches_cpu_on_pushed_stream)
 {
 	srand(45);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	static int64_t a_flat[L * POLY_SIZE];
 	static int64_t b_flat[L * POLY_SIZE];
@@ -206,7 +206,7 @@ Test(gpu_vec_znx_arith, add_gpu_matches_cpu_on_pushed_stream)
 
 	pvda_gpu_stream_destroy(stream);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -222,8 +222,8 @@ Test(gpu_vec_znx_arith, add_sub_sized_device_matches_cpu_mismatched_sizes)
 {
 	srand(51);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	size_t a_size   = 5;
 	size_t b_size   = 3;
@@ -275,7 +275,7 @@ Test(gpu_vec_znx_arith, add_sub_sized_device_matches_cpu_mismatched_sizes)
 	free(add_gpu);
 	free(sub_gpu);
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,8 +290,8 @@ Test(gpu_vec_znx_arith, normalize_sized_device_matches_cpu_mismatched_sizes)
 	srand(53);
 	uint64_t kappa = 6;
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	// Case 1: a_size(8) > res_size(5) — truncating (carry still propagates
 	// through the discarded top limbs).
@@ -354,5 +354,5 @@ Test(gpu_vec_znx_arith, normalize_sized_device_matches_cpu_mismatched_sizes)
 		free(res_gpu);
 	}
 
-	pvda_delete_module_info(module);
+	pvda_delete_backend(module);
 }

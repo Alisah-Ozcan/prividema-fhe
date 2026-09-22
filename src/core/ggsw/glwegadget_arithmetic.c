@@ -253,13 +253,13 @@ int glwegadget_automorphism(const PvdaBackend* module, GLWECiphertext* result, c
 	uint64_t biv_l = l_b_result > nrows ? l_b_result : nrows;
 
 #ifdef ENABLE_CUDA
-	// automorphism_ksk->enc_s[0]->mat must also be device-resident: auto_tmp
+	// auto_key->glwe_ksk->enc_s[0]->mat must also be device-resident: auto_tmp
 	// below is a device buffer, and glwegadget_half_prod only takes its own
 	// GPU branch (which accepts a device `a`) when glwegadget_prep_ct->mat is
 	// a device pointer too — otherwise it falls back to a CPU path that
 	// would dereference our device auto_tmp as host memory.
 	if (pvda_is_device_pointer(glwe->vec) && pvda_is_device_pointer(result->vec) &&
-	    pvda_is_device_pointer(automorphism_ksk->enc_s[0]->mat))
+	    pvda_is_device_pointer(auto_key->glwe_ksk->enc_s[0]->mat))
 	{
 		int status_gpu      = -1;
 		int64_t* d_auto_tmp = pvda_gpu_alloc(biv_l * nn);
@@ -274,7 +274,7 @@ int glwegadget_automorphism(const PvdaBackend* module, GLWECiphertext* result, c
 			                                a.l, a.stride);
 
 			// result = halfProd(C_auto(-s), auto(a)) = -halfProd(C_auto(s), a)
-			CHECK_CALL_LABEL(glwegadget_half_prod(module, result, automorphism_ksk->enc_s[0], &auto_tmp),
+			CHECK_CALL_LABEL(glwegadget_half_prod(module, result, auto_key->glwe_ksk->enc_s[0], &auto_tmp),
 			                 "half product in GPU automorphism failed", cleanup_gpu);
 
 			// auto_tmp = auto_p(b)
@@ -305,7 +305,7 @@ int glwegadget_automorphism(const PvdaBackend* module, GLWECiphertext* result, c
 			                                a_0.l, a_0.stride);
 
 			// result = halfProd(C_auto(-s_0), auto(a_0))
-			CHECK_CALL_LABEL(glwegadget_half_prod(module, result, automorphism_ksk->enc_s[0], &auto_tmp),
+			CHECK_CALL_LABEL(glwegadget_half_prod(module, result, auto_key->glwe_ksk->enc_s[0], &auto_tmp),
 			                 "half product in GPU automorphism failed", cleanup_gpu);
 
 			for (int i = 1; i < k; ++i)
@@ -316,7 +316,7 @@ int glwegadget_automorphism(const PvdaBackend* module, GLWECiphertext* result, c
 				                                (int64_t)nn, a_i.l, a_i.stride);
 
 				// result = halfProd(C_auto(-s_i), auto(a_i)) = -halfProd(C_auto(s_i), a_i)
-				CHECK_CALL_LABEL(glwegadget_half_prod(module, &glwe_tmp_dev, automorphism_ksk->enc_s[i], &auto_tmp),
+				CHECK_CALL_LABEL(glwegadget_half_prod(module, &glwe_tmp_dev, auto_key->glwe_ksk->enc_s[i], &auto_tmp),
 				                 "half product in GPU automorphism failed", cleanup_gpu);
 
 				add_glwe(module, result, result, &glwe_tmp_dev);
@@ -539,15 +539,15 @@ static void glwegadget_half_prod_gpu(GLWECiphertext* result, const GLWEGadgetCip
 // synchronizes once after the whole batch completes. scratch_auto_tmp must
 // hold >= biv_l*nn int64s; scratch_glwe_tmp (only touched when k>1) must
 // hold glwe_coef_number(result->params) int64s.
-static void glwegadget_automorphism_gpu_batched(GLWECiphertext* result, const GLWEAutomorphismKSK* automorphism_ksk,
+static void glwegadget_automorphism_gpu_batched(GLWECiphertext* result, const GLWEAutomorphismKey* auto_key,
                                                 const GLWECiphertext* glwe, int64_t* scratch_auto_tmp,
                                                 int64_t* scratch_glwe_tmp)
 {
 	uint64_t nn            = result->params->nn;
 	uint64_t k             = result->params->k;
 	uint64_t l_b_result    = glwe_params_l_b(result->params);
-	int64_t automorphism_p = automorphism_ksk->automorphism_p;
-	size_t nrows           = automorphism_ksk->params->l_tilde;
+	int64_t automorphism_p = auto_key->automorphism_p;
+	size_t nrows           = auto_key->glwe_ksk->params->l_tilde;
 	uint64_t biv_l         = l_b_result > nrows ? l_b_result : nrows;
 
 	PolyBiv auto_tmp = new_biv_view(nn, biv_l, (int64_t)nn, (PolyBivUnderlying*)scratch_auto_tmp);
@@ -560,7 +560,7 @@ static void glwegadget_automorphism_gpu_batched(GLWECiphertext* result, const GL
 		                                        (int64_t)nn, a.l, a.stride);
 
 		// result = halfProd(C_auto(-s), auto(a)) = -halfProd(C_auto(s), a)
-		glwegadget_half_prod_gpu(result, automorphism_ksk->enc_s[0], &auto_tmp);
+		glwegadget_half_prod_gpu(result, auto_key->glwe_ksk->enc_s[0], &auto_tmp);
 
 		// auto_tmp = auto_p(b)
 		PolyBiv b = glwe_extract_poly_view(glwe, k);
@@ -586,7 +586,7 @@ static void glwegadget_automorphism_gpu_batched(GLWECiphertext* result, const GL
 		                                        (int64_t)nn, a_0.l, a_0.stride);
 
 		// result = halfProd(C_auto(-s_0), auto(a_0))
-		glwegadget_half_prod_gpu(result, automorphism_ksk->enc_s[0], &auto_tmp);
+		glwegadget_half_prod_gpu(result, auto_key->glwe_ksk->enc_s[0], &auto_tmp);
 
 		for (uint64_t i = 1; i < k; ++i)
 		{
@@ -596,7 +596,7 @@ static void glwegadget_automorphism_gpu_batched(GLWECiphertext* result, const GL
 			                                        biv_l, (int64_t)nn, a_i.l, a_i.stride);
 
 			// result = halfProd(C_auto(-s_i), auto(a_i)) = -halfProd(C_auto(s_i), a_i)
-			glwegadget_half_prod_gpu(&glwe_tmp_dev, automorphism_ksk->enc_s[i], &auto_tmp);
+			glwegadget_half_prod_gpu(&glwe_tmp_dev, auto_key->glwe_ksk->enc_s[i], &auto_tmp);
 
 			// result += glwe_tmp_dev
 			size_t total = glwe_coef_number(result->params);
@@ -650,7 +650,7 @@ static void normalize_glwe_gpu_batched(GLWECiphertext* result, const GLWECiphert
 // few thousand such round trips. Only one synchronize happens here, right
 // before returning, once every op has actually been queued.
 static int glwe_trace_expand_gpu_batched(GLWECiphertext** results, int res_size, const GLWECiphertext* glwe_ct,
-                                         const GLWEAutomorphismKSKCollection* ksks, GLWECiphertext* tmp_glwe,
+                                         const GLWEAutomorphismKeyCollection* auto_key_collection, GLWECiphertext* tmp_glwe,
                                          GLWECiphertext* tmp_glwe2)
 {
 	int status = -1;
@@ -665,15 +665,15 @@ static int glwe_trace_expand_gpu_batched(GLWECiphertext** results, int res_size,
 
 	// biv_l is constant across the whole expansion: every automorphism call
 	// below shares tmp_glwe->params as its result, and every KSK drawn from
-	// `ksks` shares the same l_tilde (a single GLWEGadgetParams object is used
+	// `auto_key_collection` shares the same l_tilde (a single GLWEGadgetParams object is used
 	// to build the whole collection — see onionpir_client_phase0) — so the
 	// very first KSK lookup already fixes the scratch size every later call
 	// needs too.
-	GLWEAutomorphismKSK* first_ksk = glwegadget_ksk_collection_get_key(ksks, nn + 1);
+	GLWEAutomorphismKey* first_ksk = glwegadget_key_collection_get_key(auto_key_collection, nn + 1);
 	CHECK_ALLOC(first_ksk, "KSK retrieval failed in batched trace expand");
 
 	uint64_t l_b_result = glwe_params_l_b(tmp_glwe->params);
-	uint64_t nrows0      = first_ksk->params->l_tilde;
+	uint64_t nrows0      = first_ksk->glwe_ksk->params->l_tilde;
 	uint64_t biv_l       = l_b_result > nrows0 ? l_b_result : nrows0;
 
 	d_auto_tmp = pvda_gpu_alloc(biv_l * nn);
@@ -713,7 +713,7 @@ static int glwe_trace_expand_gpu_batched(GLWECiphertext** results, int res_size,
 		for (b = 0; b < p && b + dist < (uint64_t)res_size; ++b)
 		{
 			assert(b < (uint64_t)res_size);
-			GLWEAutomorphismKSK* ksk = glwegadget_ksk_collection_get_key(ksks, auto_p);
+			GLWEAutomorphismKey* ksk = glwegadget_key_collection_get_key(auto_key_collection, auto_p);
 			CHECK_ALLOC(ksk, "KSK retrieval failed in batched trace expand");
 
 			glwegadget_automorphism_gpu_batched(tmp_glwe, ksk, results[b], d_auto_tmp, d_glwe_tmp);
@@ -734,7 +734,7 @@ static int glwe_trace_expand_gpu_batched(GLWECiphertext** results, int res_size,
 		for (; b < p; ++b)
 		{
 			assert(b < (uint64_t)res_size);
-			GLWEAutomorphismKSK* ksk = glwegadget_ksk_collection_get_key(ksks, auto_p);
+			GLWEAutomorphismKey* ksk = glwegadget_key_collection_get_key(auto_key_collection, auto_p);
 			CHECK_ALLOC(ksk, "KSK retrieval failed in batched trace expand");
 
 			glwegadget_automorphism_gpu_batched(tmp_glwe, ksk, results[b], d_auto_tmp, d_glwe_tmp);
@@ -799,7 +799,7 @@ int glwe_trace_expand(const PvdaBackend* module, GLWECiphertext** results, int r
 #ifdef ENABLE_CUDA
 	if (pvda_is_device_pointer(glwe_ct->vec))
 	{
-		status = glwe_trace_expand_gpu_batched(results, res_size, glwe_ct, ksks, tmp_glwe, tmp_glwe2);
+		status = glwe_trace_expand_gpu_batched(results, res_size, glwe_ct, auto_key_collection, tmp_glwe, tmp_glwe2);
 		goto cleanup;
 	}
 #endif

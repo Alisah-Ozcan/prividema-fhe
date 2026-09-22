@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "backend/spqlios_alias.h"
+#include "backend/backend_arithmetic.h"
 #include "core/glwe/bivariate_polynomial.h"
 
 #define POLY_SIZE 32
@@ -31,8 +31,8 @@ Test(avx_poly_mult, svp_matches_schoolbook)
 {
 	srand(42);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	int64_t A[POLY_SIZE], B[POLY_SIZE];
 	for (int i = 0; i < POLY_SIZE; i++)
@@ -71,9 +71,9 @@ Test(avx_poly_mult, svp_matches_schoolbook)
 		             (long long)C_ref[i]);
 	}
 
-	pvda_delete_svp_ppol(a_ppol);
-	pvda_delete_vec_znx_dft(res_dft);
-	pvda_delete_module_info(module);
+	pvda_delete_svp_ppol(module, a_ppol);
+	pvda_delete_vec_znx_dft(module, res_dft);
+	pvda_delete_backend(module);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,8 +85,8 @@ Test(avx_poly_mult, svp_batch_matches_schoolbook)
 {
 	srand(42);
 
-	MODULE* module = pvda_new_module_info(POLY_SIZE);
-	cr_assert_not_null(module, "MODULE allocation failed");
+	PvdaBackend* module = pvda_new_spqlios_backend(POLY_SIZE);
+	cr_assert_not_null(module, "PvdaBackend allocation failed");
 
 	// A: single scalar polynomial
 	static int64_t A[POLY_SIZE];
@@ -128,7 +128,7 @@ Test(avx_poly_mult, svp_batch_matches_schoolbook)
 		}
 	}
 
-	pvda_delete_svp_ppol(a_ppol);
-	pvda_delete_vec_znx_dft(res_dft);
-	pvda_delete_module_info(module);
+	pvda_delete_svp_ppol(module, a_ppol);
+	pvda_delete_vec_znx_dft(module, res_dft);
+	pvda_delete_backend(module);
 }

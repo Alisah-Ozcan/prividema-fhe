@@ -247,7 +247,7 @@ PvdaParamTest(normalize_glwe, basic, default_params_fn)
 	GLWECiphertext* glwe_norm = new_glwe(params_glwe);
 
 	// Draws coefficients wider than kappa bits, so normalization must actually carry
-	uniform_random_vec(params_glwe->nn, glwe->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	uniform_pow2_random_vec(module, params_glwe->nn, glwe->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
 	                   params_glwe->kappa + 3);
 
 	// Computes normalize(glwe)
@@ -464,9 +464,9 @@ PvdaParamTest(add_glwe, gpu_matches_cpu, default_params_fn)
 	GLWECiphertext* sum_expected = new_glwe(params_glwe);
 	GLWECiphertext* sum_from_gpu = new_glwe(params_glwe);
 
-	uniform_random_vec(params_glwe->nn, glwe_lhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	uniform_pow2_random_vec(module, params_glwe->nn, glwe_lhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
 	                   params_glwe->kappa - 1);
-	uniform_random_vec(params_glwe->nn, glwe_rhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	uniform_pow2_random_vec(module, params_glwe->nn, glwe_rhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
 	                   params_glwe->kappa - 1);
 
 	// CPU reference (host pointers → CPU path)
@@ -511,9 +511,9 @@ PvdaParamTest(sub_glwe, gpu_matches_cpu, default_params_fn)
 	GLWECiphertext* sub_expected = new_glwe(params_glwe);
 	GLWECiphertext* sub_from_gpu = new_glwe(params_glwe);
 
-	uniform_random_vec(params_glwe->nn, glwe_lhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	uniform_pow2_random_vec(module, params_glwe->nn, glwe_lhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
 	                   params_glwe->kappa - 1);
-	uniform_random_vec(params_glwe->nn, glwe_rhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	uniform_pow2_random_vec(module, params_glwe->nn, glwe_rhs->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
 	                   params_glwe->kappa - 1);
 
 	// CPU reference (host pointers → CPU path)
@@ -559,7 +559,7 @@ PvdaParamTest(normalize_glwe, gpu_matches_cpu, default_params_fn)
 	GLWECiphertext* norm_from_gpu = new_glwe(params_glwe);
 
 	// Draws coefficients wider than kappa bits, so normalization must actually carry
-	uniform_random_vec(params_glwe->nn, glwe->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
+	uniform_pow2_random_vec(module, params_glwe->nn, glwe->vec, glwe_params_n_limbs(params_glwe), params_glwe->nn,
 	                   params_glwe->kappa + 3);
 
 	// CPU reference (host pointers → CPU path)
