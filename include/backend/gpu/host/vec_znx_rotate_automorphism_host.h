@@ -38,12 +38,11 @@ void gpu_vec_znx_automorphism(int64_t p, const int64_t* a_host, int64_t* res_hos
 // Device-pointer variants — a_dev/res_dev must already reside in GPU memory
 // (see pvda_is_device_pointer). No host<->device transfer is performed.
 //
-// Both allocate an internal scratch buffer (res_dev may alias a_dev — see
+// Both go through an internal scratch buffer (res_dev may alias a_dev — see
 // the aliasing note above — so the kernel can never write res_dev
-// directly), and that scratch is only safe to free once the kernel/copies
-// touching it have actually finished — so, unlike the plain add/sub/negate
-// _device functions in vec_znx_arith_host.h, these DO synchronize
-// internally before returning.
+// directly). The scratch is released stream-ordered, so, like the plain
+// add/sub/negate _device functions in vec_znx_arith_host.h, these do not
+// synchronize.
 void gpu_vec_znx_rotate_device(int64_t p, const int64_t* a_dev, int64_t* res_dev, size_t n, size_t res_size,
                                int64_t res_sl, size_t a_size, int64_t a_sl);
 

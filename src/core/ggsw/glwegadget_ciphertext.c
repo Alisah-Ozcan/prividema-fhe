@@ -194,19 +194,12 @@ int glwegadget_prepare(const PvdaBackend* module, GLWEGadgetCiphertextPrep* glwe
 	size_t nrows = glwegadget_prep_ct->params->l_tilde;
 	size_t ncols = glwe_params_n_limbs(glwegadget_prep_ct->params->params_glwe);
 
-	// The prepared ciphertext follows the raw one: (re)allocated next to it when missing or
-	// on the other side (e.g. a new_glwegadget_prep prepared from a GPU-resident GLWEGadget)
-	if (!glwegadget_prep_ct->mat ||
-	    pvda_on_gpu(module, glwegadget_prep_ct->mat) != pvda_on_gpu(module, glwegad_ct->mat))
-	{
-		pvda_free_like(module, glwegadget_prep_ct->mat);
-		glwegadget_prep_ct->mat = pvda_alloc_like(
-		    module, glwegad_ct->mat, glwegadget_coef_number(glwegadget_prep_ct->params) * sizeof(MatBivDFT));
-		CHECK_ALLOC(glwegadget_prep_ct->mat, "Prepared GLWEGadget allocation failed in glwegadget_prepare");
-	}
-
-	CHECK_CALL(pvda_vmp_prepare_contiguous(module, glwegadget_prep_ct->mat, glwegad_ct->mat, nrows, ncols),
-	           "VMP prepare for GLWEGadget prepare failed");
+	// Prepared on the GPU when either side is in GPU memory (see pvda_vmp_prepare_contiguous_placed)
+	CHECK_CALL(
+	    pvda_vmp_prepare_contiguous_placed(module, &glwegadget_prep_ct->mat,
+	                                       glwegadget_coef_number(glwegadget_prep_ct->params) * sizeof(MatBivDFT),
+	                                       glwegad_ct->mat, nrows, ncols),
+	    "VMP prepare for GLWEGadget prepare failed");
 
 	status = 0;
 cleanup:

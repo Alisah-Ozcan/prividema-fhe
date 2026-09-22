@@ -99,6 +99,11 @@ GLWECiphertext* new_glwe_on(const PvdaBackend* backend, const GLWEParams* params
 	return new_glwe(params);
 }
 
+GLWECiphertext* new_glwe_like(const PvdaBackend* backend, const GLWEParams* params, const GLWECiphertext* like)
+{
+	return pvda_on_gpu(backend, like->vec) ? new_glwe_on(backend, params) : new_glwe(params);
+}
+
 GLWECiphertext* glwe_clone_on(const PvdaBackend* backend, const GLWECiphertext* src)
 {
 	GLWECiphertext* dst = NULL;

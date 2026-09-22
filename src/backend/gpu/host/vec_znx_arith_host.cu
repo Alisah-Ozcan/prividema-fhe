@@ -248,50 +248,67 @@ void gpu_vec_znx_automorphism(int64_t p, const int64_t* a_host, int64_t* res_hos
 	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
+// Whether the limb vectors [a, a_size limbs, stride a_sl) and [res, res_size limbs, stride
+// res_sl) share memory, in which case the result goes through a scratch buffer
+static bool limbs_overlap(const int64_t* a, size_t a_size, int64_t a_sl, const int64_t* res, size_t res_size,
+                          int64_t res_sl, size_t n)
+{
+	if (a_size == 0 || res_size == 0) return false;
+	const int64_t* a_end   = a + (a_size - 1) * a_sl + n;
+	const int64_t* res_end = res + (res_size - 1) * res_sl + n;
+	return a < res_end && res < a_end;
+}
+
+// Copies res_size limbs of n coefficients from a contiguous scratch into res (stride res_sl)
+static void copy_from_scratch(int64_t* res, int64_t res_sl, const int64_t* scratch, size_t res_size, size_t n)
+{
+	CUDA_CHECK(cudaMemcpy2DAsync(res, (size_t)res_sl * sizeof(int64_t), scratch, n * sizeof(int64_t),
+	                             n * sizeof(int64_t), res_size, cudaMemcpyDeviceToDevice, gpu_active_stream));
+}
+
 void gpu_vec_znx_rotate_device(int64_t p, const int64_t* a_dev, int64_t* res_dev, size_t n, size_t res_size,
                                int64_t res_sl, size_t a_size, int64_t a_sl)
 {
+	if (res_size == 0) return;
 	size_t common = min_sz(res_size, a_size);
+	int total     = (int)(n * res_size);
+	int threads   = 256;
+	int blocks    = (total + threads - 1) / threads;
 
-	VEC_GPU<int64_t> d_scratch(res_size * n);
-
-	int total   = (int)(n * res_size);
-	int threads = 256;
-	int blocks  = (total + threads - 1) / threads;
-
+	if (!limbs_overlap(a_dev, a_size, a_sl, res_dev, res_size, res_sl, n))
+	{
+		vec_znx_rotate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, a_dev, p, (int)n, (int)res_size,
+		                                                                 (int)common, res_sl, a_sl);
+		CUDA_CHECK(cudaGetLastError());
+		return;
+	}
+	VEC_GPU<int64_t> d_scratch(res_size * n);  // released stream-ordered, no synchronization needed
 	vec_znx_rotate_kernel<<<blocks, threads, 0, gpu_active_stream>>>(d_scratch.data(), a_dev, p, (int)n, (int)res_size,
 	                                                                 (int)common, (int64_t)n, a_sl);
 	CUDA_CHECK(cudaGetLastError());
-
-	for (size_t i = 0; i < res_size; ++i)
-		CUDA_CHECK(cudaMemcpyAsync(res_dev + i * res_sl, d_scratch.data() + i * n, n * sizeof(int64_t),
-		                           cudaMemcpyDeviceToDevice, gpu_active_stream));
-	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
+	copy_from_scratch(res_dev, res_sl, d_scratch.data(), res_size, n);
 }
 
-// Same in-place-safety story as gpu_vec_znx_rotate_device above — needs its
-// own sync before the internal scratch buffer is freed.
 void gpu_vec_znx_automorphism_device(int64_t p, const int64_t* a_dev, int64_t* res_dev, size_t n, size_t res_size,
                                      int64_t res_sl, size_t a_size, int64_t a_sl)
 {
+	if (res_size == 0) return;
+	if (!limbs_overlap(a_dev, a_size, a_sl, res_dev, res_size, res_sl, n))
+	{
+		gpu_vec_znx_automorphism_device_noalias(p, a_dev, res_dev, n, res_size, res_sl, a_size, a_sl);
+		return;
+	}
 	size_t common = min_sz(res_size, a_size);
-
-	VEC_GPU<int64_t> d_scratch(res_size * n);
-
 	int64_t p_inv = gpu_mod_inverse_pow2(p, 2LL * (int64_t)n);
+	int total     = (int)(n * res_size);
+	int threads   = 256;
+	int blocks    = (total + threads - 1) / threads;
 
-	int total   = (int)(n * res_size);
-	int threads = 256;
-	int blocks  = (total + threads - 1) / threads;
-
+	VEC_GPU<int64_t> d_scratch(res_size * n);  // released stream-ordered, no synchronization needed
 	vec_znx_automorphism_kernel<<<blocks, threads, 0, gpu_active_stream>>>(
 	    d_scratch.data(), a_dev, p_inv, (int)n, (int)res_size, (int)common, (int64_t)n, a_sl);
 	CUDA_CHECK(cudaGetLastError());
-
-	for (size_t i = 0; i < res_size; ++i)
-		CUDA_CHECK(cudaMemcpyAsync(res_dev + i * res_sl, d_scratch.data() + i * n, n * sizeof(int64_t),
-		                           cudaMemcpyDeviceToDevice, gpu_active_stream));
-	CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
+	copy_from_scratch(res_dev, res_sl, d_scratch.data(), res_size, n);
 }
 
 void gpu_vec_znx_automorphism_device_noalias(int64_t p, const int64_t* a_dev, int64_t* res_dev, size_t n,

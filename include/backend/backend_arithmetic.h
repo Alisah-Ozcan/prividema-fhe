@@ -40,6 +40,17 @@ MatBivDFT* pvda_new_vmp_pmat(const PvdaBackend* backend, uint64_t nrows, uint64_
 int pvda_vmp_prepare_contiguous(const PvdaBackend* backend, MatBivDFT* pmat, const int64_t* mat, uint64_t nrows,
                                 uint64_t ncols);
 
+/**
+ * @brief pvda_vmp_prepare_contiguous, placing the prepared matrix
+ *
+ * The prepared matrix is placed in GPU memory when mat or the current *pmat is in GPU memory
+ * (a host mat is then uploaded for the preparation), and in host memory otherwise. *pmat is
+ * (re)allocated with pmat_bytes when NULL or on the other side; free it like the prepared
+ * objects (delete_ggsw_prep, delete_glwegadget_prep).
+ */
+int pvda_vmp_prepare_contiguous_placed(const PvdaBackend* backend, MatBivDFT** pmat, size_t pmat_bytes,
+                                       const int64_t* mat, uint64_t nrows, uint64_t ncols);
+
 int pvda_vmp_apply_dft(const PvdaBackend* backend, PolyBivDFT* res, uint64_t res_size, const PolyBiv* a,
                        const MatBivDFT* pmat, uint64_t nrows, uint64_t ncols);
 

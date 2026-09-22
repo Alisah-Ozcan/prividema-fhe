@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "backend_arithmetic.h"
 #include "backend_private.h"
 #include "impls/cpu_nt.h"
 #include "impls/rng_cpu.h"
@@ -111,6 +112,36 @@ void pvda_memcpy(const PvdaBackend* backend, void* dst, const void* src, size_t 
 #endif
 	(void)backend;
 	memcpy(dst, src, bytes);
+}
+
+int pvda_vmp_prepare_contiguous_placed(const PvdaBackend* backend, MatBivDFT** pmat, size_t pmat_bytes,
+                                       const int64_t* mat, uint64_t nrows, uint64_t ncols)
+{
+	int on_gpu = pvda_on_gpu(backend, *pmat) || pvda_on_gpu(backend, mat);
+#ifdef ENABLE_CUDA
+	if (on_gpu)
+	{
+		if (!pvda_on_gpu(backend, *pmat))
+		{
+			free(*pmat);
+			*pmat = (MatBivDFT*)pvda_gpu_alloc((pmat_bytes + sizeof(int64_t) - 1) / sizeof(int64_t));
+		}
+		int64_t* uploaded = NULL;
+		if (!pvda_on_gpu(backend, mat))
+		{
+			size_t n_elems = nrows * ncols * pvda_module_extract_nn(backend);
+			uploaded       = pvda_gpu_upload(mat, n_elems);
+			mat            = uploaded;
+		}
+		int status = pvda_vmp_prepare_contiguous(backend, *pmat, mat, nrows, ncols);
+		if (uploaded) pvda_gpu_free(uploaded);
+		return status;
+	}
+#endif
+	(void)on_gpu;
+	if (!*pmat) *pmat = aligned_alloc(64, (pmat_bytes + 63) / 64 * 64);
+	if (!*pmat) return -1;
+	return pvda_vmp_prepare_contiguous(backend, *pmat, mat, nrows, ncols);
 }
 
 void pvda_free_like(const PvdaBackend* backend, void* ptr)
