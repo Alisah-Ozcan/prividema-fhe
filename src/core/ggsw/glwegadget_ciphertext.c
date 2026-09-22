@@ -189,19 +189,21 @@ cleanup:
 int glwegadget_prepare(const PvdaBackend* module, GLWEGadgetCiphertextPrep* glwegadget_prep_ct,
                        const GLWEGadgetCiphertext* glwegad_ct)
 {
-#ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwegad_ct->mat))
-	{
-		if (glwegadget_prep_ct->mat && !pvda_is_device_pointer(glwegadget_prep_ct->mat)) free(glwegadget_prep_ct->mat);
-		glwegadget_prepare_gpu(glwegadget_prep_ct, glwegad_ct);
-		return 0;
-	}
-#endif
-
 	int status = -1;
 
 	size_t nrows = glwegadget_prep_ct->params->l_tilde;
 	size_t ncols = glwe_params_n_limbs(glwegadget_prep_ct->params->params_glwe);
+
+	// The prepared ciphertext follows the raw one: (re)allocated next to it when missing or
+	// on the other side (e.g. a new_glwegadget_prep prepared from a GPU-resident GLWEGadget)
+	if (!glwegadget_prep_ct->mat ||
+	    pvda_on_gpu(module, glwegadget_prep_ct->mat) != pvda_on_gpu(module, glwegad_ct->mat))
+	{
+		pvda_free_like(module, glwegadget_prep_ct->mat);
+		glwegadget_prep_ct->mat = pvda_alloc_like(
+		    module, glwegad_ct->mat, glwegadget_coef_number(glwegadget_prep_ct->params) * sizeof(MatBivDFT));
+		CHECK_ALLOC(glwegadget_prep_ct->mat, "Prepared GLWEGadget allocation failed in glwegadget_prepare");
+	}
 
 	CHECK_CALL(pvda_vmp_prepare_contiguous(module, glwegadget_prep_ct->mat, glwegad_ct->mat, nrows, ncols),
 	           "VMP prepare for GLWEGadget prepare failed");

@@ -100,6 +100,17 @@ void pvda_gpu_stream_pop(void)
 
 void* pvda_gpu_stream_get_active(void) { return (void*)gpu_active_stream; }
 
+void pvda_gpu_device_synchronize(void) { CUDA_CHECK(cudaDeviceSynchronize()); }
+
+void pvda_gpu_memcpy(void* dst, const void* src, size_t bytes)
+{
+	if (bytes == 0) return;
+	CUDA_CHECK(cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDefault, gpu_active_stream));
+	cudaPointerAttributes attr{};
+	CUDA_CHECK(cudaPointerGetAttributes(&attr, dst));
+	if (attr.type != cudaMemoryTypeDevice) CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
+}
+
 int pvda_gpu_available(void)
 {
 	int count = 0;

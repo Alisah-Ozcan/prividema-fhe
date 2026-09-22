@@ -79,9 +79,10 @@ the results are then moved to the GPU with the `*_clone_on` functions.
   one, which have the same size but are not interchangeable. Create prepared GGSWs, prepared
   GLWEGadgets and automorphism keys with the `*_on` constructors of the backend that will use
   them, and prepare them from raw objects on the same backend.
-- The `a_prep` operand of `glwegadget_half_prod_prepared_to_dft` is the spqlios-prepared
-  polynomial on the CPU, and the raw coefficients on the GPU (the GPU transforms it on the
-  fly). See the OnionPIR GPU example for a GPU database column.
+- The same holds for DFT-domain and prepared vectors (`pvda_vec_znx_dft`,
+  `pvda_vmp_prepare_vec` / `biv_coefs_to_prep`): the GPU DFT domain is an NTT domain, so
+  compute them on the backend that consumes them. The OnionPIR GPU example prepares its
+  database columns on the GPU once, as the CPU example does on the CPU.
 
 ## GPU memory
 

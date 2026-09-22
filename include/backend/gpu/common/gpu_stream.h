@@ -33,6 +33,10 @@ void pvda_gpu_stream_pop(void);
 // Returns this thread's current active stream (NULL means default stream).
 void* pvda_gpu_stream_get_active(void);
 
+// Waits until all the GPU work queued so far, on every stream, has completed. GPU operations
+// are asynchronous: use this e.g. before reading a wall-clock timer around them.
+void pvda_gpu_device_synchronize(void);
+
 // GPU buffers are served from a stream-ordered memory pool that keeps freed
 // memory cached for reuse (bounded by the PVDA_GPU_POOL_CACHE_MB environment
 // variable, unbounded by default). Synchronizes the device and returns all
@@ -41,6 +45,10 @@ void pvda_gpu_release_cached_memory(void);
 
 // Returns 1 if a CUDA device can be used, 0 otherwise (never throws).
 int pvda_gpu_available(void);
+
+// Copies bytes between any two of host and GPU memory, on the active stream. Returns once
+// the data is readable when dst is host memory.
+void pvda_gpu_memcpy(void* dst, const void* src, size_t bytes);
 
 #ifdef __cplusplus
 }

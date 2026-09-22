@@ -7,6 +7,7 @@
 #include <time.h>
 
 #include "backend.h"
+#include "backend_arithmetic.h"
 #include "bivariate_polynomial.h"
 #include "ggsw_arithmetic.h"
 #include "ggsw_ciphertext.h"
@@ -21,6 +22,7 @@
 #include "glwegadget_ciphertext.h"
 #include "glwegadget_key.h"
 #include "gpu/common/gpu_nttparameters.h"
+#include "gpu/common/gpu_stream.h"
 #include "gpu/host/ggsw_external_product_gpu.h"
 #include "maths_structures.h"
 #include "schemes/hebits.h"
@@ -92,12 +94,11 @@ int onionpir_fill_column_with_matrix_position(const GLWEParams* params_glwe, Pol
 	}
 }
 
-// Precomputed database columns, uploaded to the GPU once and reused (read-only)
-// across every query. Unlike columns_dft[] in example_PIR.c, these hold RAW
-// (un-NTT'd) coefficient-domain data — glwegadget_half_prod_prepared_to_dft's
-// GPU path performs the NTT itself on every call (see gpu_glwegadget_half_prod_ntt_device),
-// so there is no separate "prepare" step to do ahead of time on the vector side.
-// columns_gpu[0] is a zeroed placeholder for columns beyond IN_MEMORY_DFT_COLS.
+// Database columns, prepared on the GPU once and reused (read-only) across every query,
+// like columns_dft[] in example_PIR.c: a column prepared on the CUDA backend is the NTT of
+// its coefficients, which glwegadget_half_prod_prepared_to_dft then uses directly.
+// columns_gpu[0] is a zeroed placeholder for columns beyond IN_MEMORY_DFT_COLS (the NTT of
+// zero is zero).
 int64_t* columns_gpu[IN_MEMORY_DFT_COLS + 1] = {0};
 
 int64_t* onionpir_get_prepared_column_gpu(int64_t column)
@@ -106,9 +107,8 @@ int64_t* onionpir_get_prepared_column_gpu(int64_t column)
 	return columns_gpu[column + 1];
 }
 
-// GPU counterpart of prepare_column in example_PIR.c: generates the raw column
-// data on the CPU (as before — this is plaintext-like data, no benefit from the
-// GPU here) and uploads it once to device memory.
+// GPU counterpart of prepare_column in example_PIR.c: generates the raw column data on the
+// CPU (plaintext-like data), uploads it and prepares it on the GPU.
 int prepare_column_gpu(const PvdaBackend* module, int64_t column, const GLWEParams* db_params,
                        const GLWEGadgetParams* query1_params)
 {
@@ -128,7 +128,11 @@ int prepare_column_gpu(const PvdaBackend* module, int64_t column, const GLWEPara
 	PolyBiv* pos_biv = new_biv_custom_params(db_params->nn, total_depth);
 	onionpir_fill_column_with_matrix_position(db_params, pos_biv, column, query1_params->l_tilde, MATRIX_ROWS);
 
-	columns_gpu[column + 1] = pvda_gpu_upload(pos_biv->ptr, total_depth * db_params->nn);
+	int64_t* d_raw = pvda_gpu_upload(pos_biv->ptr, total_depth * db_params->nn);
+	PolyBiv raw    = new_biv_view(db_params->nn, total_depth, (int64_t)db_params->nn, (PolyBivUnderlying*)d_raw);
+	columns_gpu[column + 1] = pvda_gpu_alloc(total_depth * db_params->nn);
+	pvda_vmp_prepare_vec(module, (PolyBivPrep*)columns_gpu[column + 1], total_depth, &raw);
+	pvda_gpu_free(d_raw);
 
 	delete_biv(pos_biv);
 	return 0;
@@ -190,6 +194,8 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 		normalize_glwe(module, glwe_tree_first_level[c], glwe_tree_first_level[c]);
 	}
 
+	// GPU operations are asynchronous: wait for them before reading the clock
+	pvda_gpu_device_synchronize();
 	struct timespec server_end;
 	clock_gettime(CLOCK_REALTIME, &server_end);
 	double ms_elapsed =

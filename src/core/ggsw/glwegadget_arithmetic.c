@@ -37,47 +37,35 @@ int glwegadget_half_prod(const PvdaBackend* module, GLWECiphertext* result,
 	size_t ncols_in  = glwe_params_n_limbs(glwegadget_prep_ct->params->params_glwe);
 	size_t ncols_out = glwe_params_n_limbs(result->params);
 
-#ifdef ENABLE_CUDA
-	// `a` may be on either side: a host `a` is uploaded by the GPU path
-	int residency = PVDA_RESIDENCY(glwegadget_prep_ct->mat, result->vec);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "glwegadget_half_prod: operands mix host and GPU memory");
-		return -1;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		if (pvda_is_device_pointer(a->ptr))
-		{
-			// `a` is already device-resident (e.g. a GPU-computed automorphism
-			// scratch buffer from glwegadget_automorphism) — use it directly,
-			// no host round trip.
-			gpu_glwegadget_half_prod_device((const int64_t*)a->ptr, (const int64_t*)glwegadget_prep_ct->mat,
-			                                (int64_t*)result->vec, nn, nrows, ncols_in, ncols_out);
-		}
-		else
-		{
-			// Upload first nrows=l_tilde coef-domain limb polynomials of `a` to device
-			int64_t* d_a = pvda_gpu_upload(a->ptr, (size_t)nrows * (size_t)nn);
-			gpu_glwegadget_half_prod_device(d_a, (const int64_t*)glwegadget_prep_ct->mat, (int64_t*)result->vec, nn,
-			                                nrows, ncols_in, ncols_out);
-			pvda_gpu_free(d_a);
-		}
-		return 0;
-	}
-#endif
+	// Temporaries live next to the operands (GPU memory on a CUDA backend)
+	int64_t* a_tmp             = NULL;
+	GLWECiphertextDFT glwe_dft = {.params = result->params, .vec = NULL};
 
-	GLWECiphertextDFT* glwe_dft = new_glwe_dft(result->params);
-	CHECK_ALLOC(glwe_dft, "Allocation failed in half-product");
+	// `a` may be in host memory with the other operands on the GPU: its first nrows limbs
+	// are then copied next to them
+	PolyBiv a_view = *a;
+	if (pvda_on_gpu(module, glwegadget_prep_ct->mat) && !pvda_on_gpu(module, a->ptr))
+	{
+		uint64_t rows = a->l < nrows ? a->l : nrows;
+		a_tmp         = pvda_alloc_like(module, glwegadget_prep_ct->mat, (rows ? rows : 1) * nn * sizeof(int64_t));
+		CHECK_ALLOC(a_tmp, "Allocation failed in half-product");
+		for (uint64_t i = 0; i < rows; ++i)
+			pvda_memcpy(module, a_tmp + i * nn, a->ptr + i * a->stride, nn * sizeof(int64_t));
+		a_view = new_biv_view(nn, rows, (int64_t)nn, (PolyBivUnderlying*)a_tmp);
+	}
 
-	CHECK_CALL(pvda_vmp_apply_dft(module, glwe_dft->vec, ncols_out, a, glwegadget_prep_ct->mat, nrows, ncols_in),
+	glwe_dft.vec = pvda_alloc_like(module, result->vec, glwe_coef_number_dft(result->params) * 2 * sizeof(double));
+	CHECK_ALLOC(glwe_dft.vec, "Allocation failed in half-product");
+
+	CHECK_CALL(pvda_vmp_apply_dft(module, glwe_dft.vec, ncols_out, &a_view, glwegadget_prep_ct->mat, nrows, ncols_in),
 	           "vmp apply falied in half product");
 
-	CHECK_CALL(glwe_dft_to_coef(module, result, glwe_dft),
+	CHECK_CALL(glwe_dft_to_coef(module, result, &glwe_dft),
 	           "conversion from GLWE DFT to coefs failed in GLWEGadget half product");
 	status = 0;
 cleanup:
-	delete_glwe_dft(glwe_dft);
+	pvda_free_like(module, glwe_dft.vec);
+	pvda_free_like(module, a_tmp);
 
 	return status;
 }
@@ -91,22 +79,6 @@ int glwegadget_half_prod_dft_to_dft(const PvdaBackend* module, GLWECiphertextDFT
 	uint64_t nn      = glwegadget_prep_ct->params->params_glwe->nn;
 	size_t ncols_in  = glwe_params_n_limbs(glwegadget_prep_ct->params->params_glwe);
 	size_t ncols_out = glwe_params_n_limbs(result_dft->params);
-
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(glwegadget_prep_ct->mat, result_dft->vec, a_dft);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "glwegadget_half_prod_dft_to_dft: operands mix host and GPU memory");
-		return -1;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		// a_dft is device pointer to nrows=l_tilde coef-domain int64 polys; NTT applied inside
-		gpu_glwegadget_half_prod_ntt_device((const int64_t*)a_dft, (const int64_t*)glwegadget_prep_ct->mat,
-		                                    (int64_t*)result_dft->vec, nn, nrows, ncols_in);
-		return 0;
-	}
-#endif
 
 	CHECK_CALL(pvda_vmp_apply_dft_to_dft(module, result_dft->vec, ncols_out, (double*)a_dft, nrows,
 	                                     glwegadget_prep_ct->mat, nrows, ncols_in),
@@ -126,22 +98,6 @@ int glwegadget_half_prod_prepared_to_dft(const PvdaBackend* module, GLWECipherte
 	uint64_t nn      = glwegadget_prep_ct->params->params_glwe->nn;
 	size_t ncols_in  = glwe_params_n_limbs(glwegadget_prep_ct->params->params_glwe);
 	size_t ncols_out = glwe_params_n_limbs(result_dft->params);
-
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(glwegadget_prep_ct->mat, result_dft->vec, a_prep);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "glwegadget_half_prod_prepared_to_dft: operands mix host and GPU memory");
-		return -1;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		// a_prep is device pointer to nrows=l_tilde coef-domain int64 polys; NTT applied inside
-		gpu_glwegadget_half_prod_ntt_device((const int64_t*)a_prep, (const int64_t*)glwegadget_prep_ct->mat,
-		                                    (int64_t*)result_dft->vec, nn, nrows, ncols_in);
-		return 0;
-	}
-#endif
 
 	CHECK_CALL(pvda_vmp_apply_prepared_to_dft(module, result_dft->vec, ncols_out, (double*)a_prep, nrows,
 	                                          glwegadget_prep_ct->mat, nrows, ncols_in),

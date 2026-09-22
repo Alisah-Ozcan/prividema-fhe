@@ -101,6 +101,13 @@ void* pvda_alloc_like(const PvdaBackend* backend, const void* like, size_t bytes
 void pvda_free_like(const PvdaBackend* backend, void* ptr);
 
 /**
+ * @brief Copies bytes between two buffers, each in host or GPU memory
+ *
+ * Returns once the data is readable when dst is host memory.
+ */
+void pvda_memcpy(const PvdaBackend* backend, void* dst, const void* src, size_t bytes);
+
+/**
  * @brief Delete a Prividema-FHE backend
  *
  * @param backend The backend to delete

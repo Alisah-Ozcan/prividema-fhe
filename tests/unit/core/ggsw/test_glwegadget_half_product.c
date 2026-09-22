@@ -3,6 +3,7 @@
 #include <float.h>
 #include <stdint.h>
 
+#include "backend_arithmetic.h"
 #include "bivariate_polynomial.h"
 #include "core/glwe/glwe_arithmetic.h"
 #include "core/glwe/glwe_ciphertext.h"
@@ -482,8 +483,13 @@ PvdaParamTest(glwegadget_half_product_dft_to_dft, gpu_without_error, default_par
 	cr_assert_not_null(gpu_result_dft.vec, "pvda_gpu_alloc for NTT result failed");
 	cr_assert_not_null(gpu_result_coef.vec, "pvda_gpu_alloc for coef result failed");
 
+	// The GPU DFT domain is the NTT domain: transform m on the GPU like the CPU test does on the CPU
+	int64_t* d_m_dft = pvda_gpu_alloc(l_tilde * nn);
+	PolyBiv d_m_view = new_biv_view(nn, l_tilde, (int64_t)nn, (PolyBivUnderlying*)d_m_coef);
+	pvda_vec_znx_dft(module, (PolyBivDFT*)d_m_dft, l_tilde, &d_m_view);
+
 	PVDA_TIME_START(gpu_half_prod_dft_to_dft);
-	glwegadget_half_prod_dft_to_dft(module, &gpu_result_dft, &gpu_glwegad_prep, (PolyBivDFT*)d_m_coef);
+	glwegadget_half_prod_dft_to_dft(module, &gpu_result_dft, &gpu_glwegad_prep, (PolyBivDFT*)d_m_dft);
 	PVDA_TIME_END(gpu_half_prod_dft_to_dft, params_glwe, params_ggsw);
 
 	glwe_dft_to_coef(module, &gpu_result_coef, &gpu_result_dft);
@@ -497,6 +503,7 @@ PvdaParamTest(glwegadget_half_product_dft_to_dft, gpu_without_error, default_par
 	pvda_gpu_free(gpu_glwegad.mat);
 	pvda_gpu_free((int64_t*)gpu_glwegad_prep.mat);
 	pvda_gpu_free(d_m_coef);
+	pvda_gpu_free(d_m_dft);
 	pvda_gpu_free((int64_t*)gpu_result_dft.vec);
 	pvda_gpu_free(gpu_result_coef.vec);
 
@@ -583,8 +590,13 @@ PvdaParamTest(glwegadget_half_product_prepared_to_dft, gpu_without_error, defaul
 	cr_assert_not_null(gpu_result_dft.vec, "pvda_gpu_alloc for NTT result failed");
 	cr_assert_not_null(gpu_result_coef.vec, "pvda_gpu_alloc for coef result failed");
 
+	// Prepare m on the GPU like the CPU test prepares it on the CPU
+	int64_t* d_m_prep = pvda_gpu_alloc(l_tilde * nn);
+	PolyBiv d_m_view  = new_biv_view(nn, l_tilde, (int64_t)nn, (PolyBivUnderlying*)d_m_coef);
+	pvda_vmp_prepare_vec(module, (PolyBivPrep*)d_m_prep, l_tilde, &d_m_view);
+
 	PVDA_TIME_START(gpu_half_prod_prepared_to_dft);
-	glwegadget_half_prod_prepared_to_dft(module, &gpu_result_dft, &gpu_glwegad_prep, (PolyBivPrep*)d_m_coef);
+	glwegadget_half_prod_prepared_to_dft(module, &gpu_result_dft, &gpu_glwegad_prep, (PolyBivPrep*)d_m_prep);
 	PVDA_TIME_END(gpu_half_prod_prepared_to_dft, params_glwe, params_ggsw);
 
 	glwe_dft_to_coef(module, &gpu_result_coef, &gpu_result_dft);
@@ -598,6 +610,7 @@ PvdaParamTest(glwegadget_half_product_prepared_to_dft, gpu_without_error, defaul
 	pvda_gpu_free(gpu_glwegad.mat);
 	pvda_gpu_free((int64_t*)gpu_glwegad_prep.mat);
 	pvda_gpu_free(d_m_coef);
+	pvda_gpu_free(d_m_prep);
 	pvda_gpu_free((int64_t*)gpu_result_dft.vec);
 	pvda_gpu_free(gpu_result_coef.vec);
 

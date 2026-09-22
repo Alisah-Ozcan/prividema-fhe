@@ -1,6 +1,7 @@
 #include "backend.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "backend_private.h"
 #include "impls/cpu_nt.h"
@@ -97,6 +98,19 @@ void* pvda_alloc_like(const PvdaBackend* backend, const void* like, size_t bytes
 	(void)backend;
 	(void)like;
 	return aligned_alloc(64, (bytes + 63) / 64 * 64);
+}
+
+void pvda_memcpy(const PvdaBackend* backend, void* dst, const void* src, size_t bytes)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_on_gpu(backend, dst) || pvda_on_gpu(backend, src))
+	{
+		pvda_gpu_memcpy(dst, src, bytes);
+		return;
+	}
+#endif
+	(void)backend;
+	memcpy(dst, src, bytes);
 }
 
 void pvda_free_like(const PvdaBackend* backend, void* ptr)
