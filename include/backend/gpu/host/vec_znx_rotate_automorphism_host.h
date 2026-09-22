@@ -62,15 +62,6 @@ void gpu_vec_znx_automorphism_device(int64_t p, const int64_t* a_dev, int64_t* r
 void gpu_vec_znx_automorphism_device_noalias(int64_t p, const int64_t* a_dev, int64_t* res_dev, size_t n,
                                              size_t res_size, int64_t res_sl, size_t a_size, int64_t a_sl);
 
-// Same in-place-safe scratch/copy-out strategy as gpu_vec_znx_rotate_device
-// (res_dev may alias a_dev), but scratch_dev is caller-provided — sized
-// res_size*n int64s — and its lifetime is the caller's responsibility, not
-// freed in here. Since there is nothing left for this function itself to
-// wait on, it does not synchronize; the caller synchronizes once, whenever
-// it actually needs res_dev or is about to free scratch_dev.
-void gpu_vec_znx_rotate_device_scratch(int64_t p, const int64_t* a_dev, int64_t* res_dev, size_t n, size_t res_size,
-                                       int64_t res_sl, size_t a_size, int64_t a_sl, int64_t* scratch_dev);
-
 #ifdef __cplusplus
 }
 #endif

@@ -176,12 +176,9 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	GLWECiphertext* row_query_dev = glwe_clone_on(module, row_query);
 	GLWECiphertext* col_query_dev = glwe_clone_on(module, col_query);
 
-	// --- Row query expansion — now fully on the GPU: row_trace_unprep is a
-	// device buffer, packed_glwegadget_trace_expand's automorphism/rotation
-	// steps dispatch through glwegadget_automorphism/glwe_trace_expand's GPU
-	// branches (see gpu/host/vec_znx_rotate_automorphism_host.h), and
-	// glwegadget_prepare below already dispatches to glwegadget_prepare_gpu
-	// once its raw input is device-resident. ---
+	// --- Row query expansion — on the GPU: row_trace_unprep is created on the
+	// CUDA backend, so packed_glwegadget_trace_expand and the glwegadget_prepare
+	// below run there. ---
 	GLWEGadgetCiphertext gadgets[MATRIX_ROWS];
 	GLWEGadgetCiphertext* gptrs[MATRIX_ROWS];
 	GLWEGadgetCiphertext* row_trace_unprep = new_glwegadget_on(module, mega_params);
@@ -243,11 +240,9 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 
 	delete_glwegadget_prep(glwegad_trace);
 
-	// --- Column-selection query expansion — also fully on the GPU now:
-	// ggsw_trace_raw[] is device-resident, packed_glwegadget_trace_expand_ggsw's
-	// internal glwe_trace_expand + ggsw_external_product calls dispatch to
-	// their GPU branches, and ggsw_prepare below already dispatches to
-	// ggsw_prepare_gpu once its raw input is device-resident. ---
+	// --- Column-selection query expansion — on the GPU as well: ggsw_trace_raw[]
+	// is created on the CUDA backend, so packed_glwegadget_trace_expand_ggsw and
+	// the ggsw_prepare below run there. ---
 	GGSWCiphertext* ggsw_trace_raw[LOG2_COLS] = {0};
 	for (int r = 0; r < LOG2_COLS; ++r) ggsw_trace_raw[r] = new_ggsw_on(module, ggsw_ksk_params);
 

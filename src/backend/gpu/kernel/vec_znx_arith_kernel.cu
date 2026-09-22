@@ -9,16 +9,6 @@ __global__ void vec_znx_add_kernel(int64_t* res, const int64_t* a, const int64_t
 	res[idx] = a[idx] + b[idx];
 }
 
-__global__ void vec_znx_add_strided_kernel(int64_t* res, int64_t res_stride, const int64_t* a, int64_t a_stride,
-                                           const int64_t* b, int64_t b_stride, int n, int total)
-{
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx >= total) return;
-	int limb                      = idx / n;
-	int coef                      = idx - limb * n;
-	res[limb * res_stride + coef] = a[limb * a_stride + coef] + b[limb * b_stride + coef];
-}
-
 __global__ void vec_znx_sub_kernel(int64_t* res, const int64_t* a, const int64_t* b, int total)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;

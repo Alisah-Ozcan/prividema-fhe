@@ -210,15 +210,14 @@ Test(gpu_vec_znx_arith, add_gpu_matches_cpu_on_pushed_stream)
 }
 
 // ---------------------------------------------------------------------------
-// Test: gpu_vec_znx_add_sized_device / gpu_vec_znx_sub_sized_device match
-// spqlios' vec_znx_add_ref / vec_znx_sub_ref for operands of DIFFERING limb
-// counts (a_size != b_size != res_size) — isolates the exact bug class found
-// in add_glwe/sub_glwe's GPU dispatch (glwe_trace_expand calls them with
-// operands whose params legitimately differ), independent of any GLWE/FHE
-// semantics.
+// Test: the CUDA backend's pvda_vec_znx_add / pvda_vec_znx_sub on GPU
+// operands match spqlios' vec_znx_add_ref / vec_znx_sub_ref for operands of
+// DIFFERING limb counts (a_size != b_size != res_size) — the case of
+// add_glwe/sub_glwe on ciphertexts of different params (e.g. in
+// glwe_trace_expand), independent of any GLWE/FHE semantics.
 // ---------------------------------------------------------------------------
 
-Test(gpu_vec_znx_arith, add_sub_sized_device_matches_cpu_mismatched_sizes)
+Test(gpu_vec_znx_arith, add_sub_backend_matches_cpu_mismatched_sizes)
 {
 	srand(51);
 
@@ -248,8 +247,12 @@ Test(gpu_vec_znx_arith, add_sub_sized_device_matches_cpu_mismatched_sizes)
 	int64_t* d_add_res = pvda_gpu_alloc(res_size * POLY_SIZE);
 	int64_t* d_sub_res = pvda_gpu_alloc(res_size * POLY_SIZE);
 
-	gpu_vec_znx_add_sized_device(d_a, a_size, d_b, b_size, d_add_res, res_size, POLY_SIZE);
-	gpu_vec_znx_sub_sized_device(d_a, a_size, d_b, b_size, d_sub_res, res_size, POLY_SIZE);
+	PolyBiv g_a   = new_biv_view(POLY_SIZE, a_size, POLY_SIZE, d_a);
+	PolyBiv g_b   = new_biv_view(POLY_SIZE, b_size, POLY_SIZE, d_b);
+	PolyBiv g_add = new_biv_view(POLY_SIZE, res_size, POLY_SIZE, d_add_res);
+	PolyBiv g_sub = new_biv_view(POLY_SIZE, res_size, POLY_SIZE, d_sub_res);
+	cr_assert_eq(pvda_vec_znx_add(module, &g_add, &g_a, &g_b), 0, "pvda_vec_znx_add (GPU) failed");
+	cr_assert_eq(pvda_vec_znx_sub(module, &g_sub, &g_a, &g_b), 0, "pvda_vec_znx_sub (GPU) failed");
 
 	int64_t* add_gpu = malloc(res_size * POLY_SIZE * sizeof(int64_t));
 	int64_t* sub_gpu = malloc(res_size * POLY_SIZE * sizeof(int64_t));

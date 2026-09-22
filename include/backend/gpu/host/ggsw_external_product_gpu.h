@@ -98,13 +98,10 @@ GLWEGadgetCiphertext* pvda_new_glwegadget_device(const GLWEGadgetParams* params)
 // Free with delete_ggsw, which is itself device-aware.
 GGSWCiphertext* pvda_new_ggsw_device(const GGSWParams* params);
 
-// Allocate a new GLWEGadgetCiphertextPrep whose mat is a device placeholder —
-// the device-resident counterpart of new_glwegadget_prep. Its only purpose
-// is to signal "prepare this on the GPU" to callers such as
-// prepare_automorphism_key (which check pvda_is_device_pointer(...->mat) to
-// decide whether to NTT-prepare on device vs DFT-prepare on host — those two
-// domains are NOT interchangeable, so this placeholder must never be read
-// before glwegadget_prepare(_gpu) replaces it). Free with
+// Allocate a new GLWEGadgetCiphertextPrep in GPU memory — the device-resident
+// counterpart of new_glwegadget_prep (see also new_glwegadget_prep_on).
+// glwegadget_prepare fills it on the GPU, in the NTT domain: GPU and CPU
+// (FFT) prepared matrices are NOT interchangeable. Free with
 // delete_glwegadget_prep, which is itself device-aware.
 GLWEGadgetCiphertextPrep* pvda_new_glwegadget_prep_device(const GLWEGadgetParams* params);
 
@@ -137,106 +134,12 @@ GLWEGadgetCiphertext* pvda_glwegadget_upload(const GLWEGadgetCiphertext* host_gl
 GLWECiphertextDFT* pvda_new_glwe_dft_device(const GLWEParams* params);
 
 // ---------------------------------------------------------------------------
-// GPU external product — all pointer arguments must be CUDA device pointers.
-//
-// d_glwe   : [a_limbs * n]        — GLWE vector, a_limbs <= nrows (its own limb count;
-//                                    may be smaller than nrows when the GGSW selector's
-//                                    associated GLWE params differ from the ciphertext
-//                                    being multiplied — the missing rows are zero-padded,
-//                                    mirroring spqlios' implicit zero-padding on the CPU path)
-// d_ggsw   : [nrows * ncols * n]  — GGSW matrix, row-major
-// d_result : [ncols * n]          — output (written on device, caller downloads)
-//
-// Computes: d_result[j] = INTT( sum_i NTT(d_glwe[i]) * NTT(d_ggsw[i][j]) )
-// ---------------------------------------------------------------------------
-void gpu_ggsw_external_product_device(const int64_t* d_glwe, const int64_t* d_ggsw, int64_t* d_result, size_t n,
-                                      size_t nrows, size_t ncols, size_t a_limbs);
-
-// ---------------------------------------------------------------------------
-// GPU prepare — NTT of the full GGSW matrix on device.
-//
-// Uploads the raw int64_t GGSW matrix to device, computes NTT of every
-// polynomial, and stores the result in gpu_prep->mat (cast as MatBivDFT*).
-// Caller must set gpu_prep->params before calling.
-// Free with pvda_gpu_free((int64_t*)gpu_prep->mat).
-// ---------------------------------------------------------------------------
-void ggsw_prepare_gpu(GGSWCiphertextPrep* gpu_prep, const GGSWCiphertext* ggsw);
-
-// ---------------------------------------------------------------------------
-// NTT-domain VMP — GGSW is already NTT'd, result left in NTT domain (no INTT).
-//
-// d_glwe      : [a_limbs * n]        — raw int64_t on device, a_limbs <= nrows (see
-//                                       gpu_ggsw_external_product_device — missing rows
-//                                       are zero-padded)
-// d_ggsw_ntt  : [nrows * ncols * n]  — NTT-domain int64_t on device (from ggsw_prepare_gpu)
-// d_result_ntt: [ncols * n]          — NTT-domain output on device
-// ---------------------------------------------------------------------------
-void gpu_ggsw_ext_prod_ntt_device(const int64_t* d_glwe, const int64_t* d_ggsw_ntt, int64_t* d_result_ntt, size_t n,
-                                  size_t nrows, size_t ncols, size_t a_limbs);
-
-// ---------------------------------------------------------------------------
-// GPU INTT — convert NTT-domain GLWECiphertextDFT to coefficient-domain GLWECiphertext.
-//
-// Both d_result->vec and d_glwe_ntt->vec must be device pointers holding int64_t.
-// Mirrors the CPU glwe_dft_to_coef for the GPU NTT path.
-// ---------------------------------------------------------------------------
-void glwe_dft_to_coef_gpu(GLWECiphertext* d_result, const GLWECiphertextDFT* d_glwe_ntt);
-
-// ---------------------------------------------------------------------------
 // GLWEGadget half-product helpers
 // ---------------------------------------------------------------------------
 
 // Allocate device buffer and upload the coefficient matrix of a GLWEGadgetCiphertext.
 // Returned pointer holds  l_tilde * ciphertext_nb_limbs * nn  int64_t values (row-major).
 int64_t* pvda_glwegadget_to_device(const GLWEGadgetCiphertext* glwegad);
-
-// NTT-prepare a GLWEGadgetCiphertext on device.
-// Uploads the raw int64_t gadget matrix, computes NTT of every polynomial,
-// and stores the result in gpu_prep->mat (cast as MatBivDFT*).
-// Caller must set gpu_prep->params before calling.
-// Free with pvda_gpu_free((int64_t*)gpu_prep->mat).
-void glwegadget_prepare_gpu(GLWEGadgetCiphertextPrep* gpu_prep, const GLWEGadgetCiphertext* glwegad);
-
-// ---------------------------------------------------------------------------
-// GPU half-product — gadget matrix already NTT'd (from glwegadget_prepare_gpu).
-//
-// d_a          : [nrows * n]              — l_tilde coef-domain int64 polys on device
-// d_glwegad_ntt: [nrows * ncols_in * n]   — NTT-domain gadget matrix on device;
-//                                            ncols_in is the matrix's OWN column
-//                                            count (from the GLWEGadgetCiphertextPrep
-//                                            that was NTT-prepared), independent of
-//                                            the caller's result buffer size.
-// d_result     : [ncols_out * n]          — coef-domain output (NTT + VMP + INTT).
-//                                            Only min(ncols_in, ncols_out) columns
-//                                            are ever real VMP output; if
-//                                            ncols_out > ncols_in the remaining
-//                                            tail is zeroed (mirrors spqlios
-//                                            vmp_apply_dft's res_size vs matrix-ncols
-//                                            handling on the CPU path) — ncols_in and
-//                                            ncols_out must NEVER be conflated into a
-//                                            single parameter here, since the gadget
-//                                            matrix's own params_glwe can legitimately
-//                                            differ from the result's (e.g. an
-//                                            automorphism KSK's own precision vs the
-//                                            GLWE ciphertext being transformed).
-// ---------------------------------------------------------------------------
-// Allocates internal NTT scratch buffers (d_a_ntt, d_c_ntt) that are only
-// safe to free once the NTT/VMP/INTT pipeline touching them has actually
-// finished, so — unlike the plain vec_znx _device functions in
-// vec_znx_arith_host.h, which have no internal scratch to protect — this
-// DOES synchronize internally before returning.
-void gpu_glwegadget_half_prod_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result, size_t n,
-                                     size_t nrows, size_t ncols_in, size_t ncols_out);
-
-// ---------------------------------------------------------------------------
-// GPU half-product leaving result in NTT domain (no INTT).
-//
-// d_a          : [nrows * n]           — l_tilde coef-domain int64 polys on device
-// d_glwegad_ntt: [nrows * ncols * n]   — NTT-domain gadget matrix on device
-// d_result_ntt : [ncols * n]           — NTT-domain output (NTT + VMP, no INTT)
-// ---------------------------------------------------------------------------
-void gpu_glwegadget_half_prod_ntt_device(const int64_t* d_a, const int64_t* d_glwegad_ntt, int64_t* d_result_ntt,
-                                         size_t n, size_t nrows, size_t ncols);
 
 #ifdef __cplusplus
 }
