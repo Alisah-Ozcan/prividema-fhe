@@ -88,6 +88,7 @@ struct pvda_module_t
 	struct pvda_fft_data_t* pvda_fft_data;
 
 	PvdaVirutalTable vt;
+	PvdaVirutalTable host_vt;  ///< CUDA backend: the spqlios table, used for host-resident operands
 };
 
 typedef struct pvda_module_t PvdaBackend;

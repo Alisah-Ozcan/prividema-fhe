@@ -15,6 +15,7 @@ add_library(PVDA_GPU STATIC
     host/ntt_poly_mult_host.cu
     host/vec_znx_arith_host.cu
     host/ggsw_external_product_gpu.cu
+    host/vtable_ops_host.cu
 )
 
 set_target_properties(PVDA_GPU PROPERTIES

@@ -17,6 +17,7 @@
 #ifdef ENABLE_CUDA
 #include "gpu/common/gpu_nttparameters.h"
 #include "gpu/common/gpu_stream.h"
+#include "impls/cuda_alias.h"
 #endif
 
 #include "logger.h"
@@ -34,6 +35,7 @@ PvdaBackend* pvda_new_spqlios_backend(int nn)
 #endif
 	res->pvda_fft_data = new_fft_data(nn);
 	pvda_fill_cpu_nt(&res->vt);
+	res->host_vt = res->vt;
 	return res;
 }
 
@@ -50,6 +52,8 @@ PvdaBackend* pvda_new_cuda_backend(int nn)
 	PvdaBackend* res = pvda_new_spqlios_backend(nn);
 	if (!res) return NULL;
 	res->type = PVDA_BACKEND_CUDA;
+	// host_vt keeps the spqlios table (set by pvda_new_spqlios_backend) for host operands
+	pvda_fill_cuda(&res->vt);
 	gpu_ntt_initialize((size_t)nn);
 	return res;
 #else
