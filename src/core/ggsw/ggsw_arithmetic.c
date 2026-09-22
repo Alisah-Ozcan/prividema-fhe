@@ -19,10 +19,6 @@
 #include "rng.h"
 #include "utils.h"
 
-#ifdef ENABLE_CUDA
-#include "gpu/host/ggsw_external_product_gpu.h"
-#endif
-
 // bivGGSW PART (begin)
 
 int normalize_ggsw(const PvdaBackend* module, GGSWCiphertext* result, const GGSWCiphertext* ggsw)
@@ -111,29 +107,11 @@ int ggsw_unprepared_external_product(const PvdaBackend* module,
 	uint64_t ncols_in  = glwe_params_n_limbs(ggsw->params->params_glwe);
 	uint64_t ncols_out = glwe_params_n_limbs(result->params);
 
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(glwe->vec, ggsw->mat, result->vec);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "ggsw_unprepared_external_product: operands mix host and GPU memory");
-		return -1;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		// glwe's own limb count — may be smaller than nrows (e.g. the GGSW selector's
-		// associated GLWE params differ from the ciphertext being multiplied); the GPU
-		// path zero-pads the missing rows rather than reading past glwe->vec.
-		uint64_t a_limbs = glwe_params_n_limbs(glwe->params);
-		gpu_ggsw_external_product_device((const int64_t*)glwe->vec, (const int64_t*)ggsw->mat, (int64_t*)result->vec,
-		                                 nn, nrows, ncols_in, a_limbs);
-		return 0;
-	}
-#endif
-
+	// Temporaries live next to the operands (GPU memory on a CUDA backend)
 	MatBivDFT* ggsw_pmat  = NULL;  // Prepared bivGGSW ciphertext
 	VecBivDFT* result_dft = NULL;  // ExternalProduct(glwe, ggsw)
-	ggsw_pmat             = malloc(ggsw_bytes(ggsw->params));
-	result_dft            = malloc(glwe_params_bytes(ggsw->params->params_glwe));
+	ggsw_pmat             = pvda_alloc_like(module, ggsw->mat, ggsw_bytes(ggsw->params));
+	result_dft            = pvda_alloc_like(module, ggsw->mat, glwe_params_bytes(ggsw->params->params_glwe));
 
 	CHECK_ALLOC(ggsw_pmat, "mat_dft's malloc failed in ggsw_external_product");
 	CHECK_ALLOC(result_dft, "result's malloc failed in ggsw_external_product");
@@ -152,8 +130,8 @@ int ggsw_unprepared_external_product(const PvdaBackend* module,
 	status = 0;
 
 cleanup:
-	delete_biv_dft(result_dft);
-	free(ggsw_pmat);
+	pvda_free_like(module, result_dft);
+	pvda_free_like(module, ggsw_pmat);
 
 	return status;
 }
@@ -166,25 +144,6 @@ int ggsw_external_product_to_dft(const PvdaBackend* module, GLWECiphertextDFT* r
 	uint64_t nrows   = ggsw_num_rows(ggsw_prepared->params);
 	size_t ncols_in  = glwe_params_n_limbs(ggsw_prepared->params->params_glwe);
 	size_t ncols_out = glwe_params_n_limbs(result->params);
-
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(glwe->vec, ggsw_prepared->mat, result->vec);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "ggsw_external_product_to_dft: operands mix host and GPU memory");
-		return -1;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		// ggsw_prepared->mat holds NTT-domain data (from ggsw_prepare_gpu); result stays NTT domain.
-		// glwe's own limb count may be smaller than nrows (see ggsw_unprepared_external_product) —
-		// the GPU path zero-pads the missing rows rather than reading past glwe->vec.
-		uint64_t a_limbs = glwe_params_n_limbs(glwe->params);
-		gpu_ggsw_ext_prod_ntt_device((const int64_t*)glwe->vec, (const int64_t*)ggsw_prepared->mat,
-		                             (int64_t*)result->vec, nn, nrows, ncols_in, a_limbs);
-		return 0;
-	}
-#endif
 
 	PolyBiv glwe_flattened = glwe_flattened_biv(glwe);
 	CHECK_CALL(pvda_vmp_apply_dft(module, result->vec, ncols_out, &glwe_flattened, ggsw_prepared->mat, nrows, ncols_in),
@@ -205,40 +164,18 @@ int ggsw_external_product(const PvdaBackend* module, GLWECiphertext* result, con
 	uint64_t nrows  = ggsw_num_rows(ggsw_prepared->params);
 	size_t ncols_in = glwe_params_n_limbs(ggsw_prepared->params->params_glwe);
 
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(glwe->vec, ggsw_prepared->mat, result->vec);
-	if (residency == PVDA_MIXED_RESIDENCY)
-	{
-		log_message(LOG_ERROR, "ggsw_external_product: operands mix host and GPU memory");
-		return -1;
-	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		// NTT-domain VMP then INTT: mirrors ggsw_external_product_to_dft + glwe_dft_to_coef on GPU.
-		// glwe's own limb count may be smaller than nrows (see ggsw_unprepared_external_product) —
-		// the GPU path zero-pads the missing rows rather than reading past glwe->vec.
-		uint64_t a_limbs              = glwe_params_n_limbs(glwe->params);
-		int64_t* d_tmp_ntt            = pvda_gpu_alloc((size_t)ncols_in * (size_t)nn);
-		GLWECiphertextDFT tmp_ntt_dft = {.params = result->params, .vec = (VecBivDFT*)d_tmp_ntt};
+	// DFT-domain temporary next to the operands (GPU memory on a CUDA backend)
+	GLWECiphertextDFT tmp_dft = {
+	    .params = result->params,
+	    .vec    = pvda_alloc_like(module, glwe->vec, glwe_coef_number_dft(result->params) * 2 * sizeof(double))};
+	CHECK_ALLOC(tmp_dft.vec, "Failed allocation in ggsw external product to non-dft");
 
-		gpu_ggsw_ext_prod_ntt_device((const int64_t*)glwe->vec, (const int64_t*)ggsw_prepared->mat, d_tmp_ntt, nn,
-		                             nrows, ncols_in, a_limbs);
-		glwe_dft_to_coef(module, result, &tmp_ntt_dft);
-
-		pvda_gpu_free(d_tmp_ntt);
-		return 0;
-	}
-#endif
-
-	GLWECiphertextDFT* tmp_dft = new_glwe_dft(result->params);
-	CHECK_ALLOC(tmp_dft, "Failed allocation in ggsw external product to non-dft");
-
-	CHECK_CALL(ggsw_external_product_to_dft(module, tmp_dft, glwe, ggsw_prepared), "External product failed");
-	CHECK_CALL(glwe_dft_to_coef(module, result, tmp_dft), "Failed iDFT in ggsw product");
+	CHECK_CALL(ggsw_external_product_to_dft(module, &tmp_dft, glwe, ggsw_prepared), "External product failed");
+	CHECK_CALL(glwe_dft_to_coef(module, result, &tmp_dft), "Failed iDFT in ggsw product");
 
 	status = 0;
 cleanup:
-	delete_glwe_dft(tmp_dft);
+	pvda_free_like(module, tmp_dft.vec);
 
 	return status;
 }

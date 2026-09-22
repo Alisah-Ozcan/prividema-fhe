@@ -17,6 +17,7 @@
 #ifdef ENABLE_CUDA
 #include "gpu/common/gpu_nttparameters.h"
 #include "gpu/common/gpu_stream.h"
+#include "gpu/host/ggsw_external_product_gpu.h"
 #include "impls/cuda_alias.h"
 #endif
 
@@ -77,6 +78,40 @@ PvdaBackend* pvda_new_backend(PvdaBackendConfig config)
 }
 
 PvdaBackendType pvda_backend_type(const PvdaBackend* backend) { return backend->type; }
+
+int pvda_on_gpu(const PvdaBackend* backend, const void* ptr)
+{
+#ifdef ENABLE_CUDA
+	if (backend->type == PVDA_BACKEND_CUDA && ptr) return pvda_is_device_pointer(ptr);
+#endif
+	(void)backend;
+	(void)ptr;
+	return 0;
+}
+
+void* pvda_alloc_like(const PvdaBackend* backend, const void* like, size_t bytes)
+{
+#ifdef ENABLE_CUDA
+	if (pvda_on_gpu(backend, like)) return pvda_gpu_alloc((bytes + sizeof(int64_t) - 1) / sizeof(int64_t));
+#endif
+	(void)backend;
+	(void)like;
+	return aligned_alloc(64, (bytes + 63) / 64 * 64);
+}
+
+void pvda_free_like(const PvdaBackend* backend, void* ptr)
+{
+	if (!ptr) return;
+#ifdef ENABLE_CUDA
+	if (pvda_on_gpu(backend, ptr))
+	{
+		pvda_gpu_free((int64_t*)ptr);
+		return;
+	}
+#endif
+	(void)backend;
+	free(ptr);
+}
 
 void pvda_delete_backend(PvdaBackend* backend)
 {

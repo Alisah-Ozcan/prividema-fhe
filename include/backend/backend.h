@@ -1,6 +1,7 @@
 #ifndef PVDA_BACKEND_H
 #define PVDA_BACKEND_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /**
@@ -72,6 +73,32 @@ PvdaBackend* pvda_new_backend(PvdaBackendConfig config);
  * @return The backend type
  */
 PvdaBackendType pvda_backend_type(const PvdaBackend* backend);
+
+/**
+ * @brief Tells whether a buffer is in GPU memory, as seen by a backend
+ *
+ * @return 1 for GPU memory on a CUDA backend, 0 otherwise (always 0 on a spqlios backend)
+ */
+int pvda_on_gpu(const PvdaBackend* backend, const void* ptr);
+
+/**
+ * @brief Allocates a buffer on the same side (host or GPU memory) as another buffer
+ *
+ * Used for the temporaries of an operation, which must live where its operands live. On a
+ * spqlios backend the buffer is always host memory (64-byte aligned).
+ *
+ * @param backend The backend
+ * @param like    A buffer whose side the new buffer is placed on
+ * @param bytes   The size of the new buffer
+ *
+ * @return NULL in case of failure, the new (uninitialized) buffer otherwise. Free with pvda_free_like
+ */
+void* pvda_alloc_like(const PvdaBackend* backend, const void* like, size_t bytes);
+
+/**
+ * @brief Frees a buffer from pvda_alloc_like (or any host malloc'd buffer)
+ */
+void pvda_free_like(const PvdaBackend* backend, void* ptr);
 
 /**
  * @brief Delete a Prividema-FHE backend
