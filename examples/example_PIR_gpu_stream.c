@@ -148,13 +148,10 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 {
 	// CMux-tree leaves — device-resident. A single contiguous allocation
 	// sliced into MATRIX_COLS views, instead of MATRIX_COLS separate
-	// pvda_new_glwe_device calls: that helper does its own cudaMalloc *and*
-	// a host malloc(sizeof(GLWECiphertext)) per call, so 256 individual
-	// calls means 256 host heap allocations and 256 device allocations
-	// (each a driver-level sync point) for what is really one block of GPU
-	// memory. Here the leaf structs themselves live on the stack (no host
-	// heap allocation at all) and only their .vec pointers are sliced out
-	// of the one device buffer, freed in a single pvda_gpu_free below.
+	// new_glwe_on calls (each a device allocation plus a host
+	// malloc(sizeof(GLWECiphertext))). Here the leaf structs themselves live
+	// on the stack and only their .vec pointers are sliced out of the one
+	// device buffer, freed in a single pvda_gpu_free below.
 	uint64_t leaf_elems          = glwe_coef_number(aggregation_params);
 	int64_t* d_glwe_tree_storage = pvda_gpu_alloc((size_t)MATRIX_COLS * leaf_elems);
 	GLWECiphertext glwe_tree_storage[MATRIX_COLS];
@@ -173,8 +170,8 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	// sampling has no GPU path) — upload them once so every downstream op
 	// (glwegadget_automorphism, glwe_rotate_flattened_inplace, add_glwe, ...)
 	// sees a device-resident source and takes its GPU branch.
-	GLWECiphertext* row_query_dev = pvda_glwe_upload(row_query);
-	GLWECiphertext* col_query_dev = pvda_glwe_upload(col_query);
+	GLWECiphertext* row_query_dev = glwe_clone_on(module, row_query);
+	GLWECiphertext* col_query_dev = glwe_clone_on(module, col_query);
 
 	// --- Row query expansion — now fully on the GPU: row_trace_unprep is a
 	// device buffer, packed_glwegadget_trace_expand's automorphism/rotation
@@ -184,7 +181,7 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	// once its raw input is device-resident. ---
 	GLWEGadgetCiphertext gadgets[MATRIX_ROWS];
 	GLWEGadgetCiphertext* gptrs[MATRIX_ROWS];
-	GLWEGadgetCiphertext* row_trace_unprep = pvda_new_glwegadget_device(mega_params);
+	GLWEGadgetCiphertext* row_trace_unprep = new_glwegadget_on(module, mega_params);
 	for (int r = 0; r < MATRIX_ROWS; ++r)
 	{
 		gadgets[r].params = query1_params;
@@ -212,7 +209,7 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	for (int s = 0; s < NUM_STREAMS; ++s)
 	{
 		streams[s] = pvda_gpu_stream_create();
-		tmp_glwe_dft_gpu[s] = pvda_new_glwe_dft_device(aggregation_params);
+		tmp_glwe_dft_gpu[s] = new_glwe_dft_on(module, aggregation_params);
 	}
 
 	for (int64_t c = 0; c < MATRIX_COLS; ++c)
@@ -247,7 +244,7 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	// their GPU branches, and ggsw_prepare below already dispatches to
 	// ggsw_prepare_gpu once its raw input is device-resident. ---
 	GGSWCiphertext* ggsw_trace_raw[LOG2_COLS] = {0};
-	for (int r = 0; r < LOG2_COLS; ++r) ggsw_trace_raw[r] = pvda_new_ggsw_device(ggsw_ksk_params);
+	for (int r = 0; r < LOG2_COLS; ++r) ggsw_trace_raw[r] = new_ggsw_on(module, ggsw_ksk_params);
 
 	packed_glwegadget_trace_expand_ggsw(module, ggsw_trace_raw, LOG2_COLS, ggsw_params_l_tilde_a(ggsw_ksk_params),
 	                                    col_query_dev, ksks, ggsw_ksks);
@@ -267,15 +264,15 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	// result are all device-resident, and hebits_cmux_tree allocates its own
 	// intermediate nodes on the device too (see hebits_new_glwe in hebits.c).
 	// delete_src=0: the leaves are slices of the single d_glwe_tree_storage
-	// allocation (see above), not independent pvda_new_glwe_device buffers,
+	// allocation (see above), not independent new_glwe_on buffers,
 	// so hebits_cmux_tree must not delete_glwe() them one by one (that would
 	// cudaFree() an interior pointer and free() a stack address). We own
 	// that buffer and release it in one pvda_gpu_free below instead. ---
-	GLWECiphertext* res_gpu = pvda_new_glwe_device(res->params);
+	GLWECiphertext* res_gpu = new_glwe_on(module, res->params);
 	hebits_cmux_tree(module, res_gpu, (const GLWECiphertext**)glwe_tree_first_level, MATRIX_COLS,
 	               (const GGSWCiphertextPrep**)ggsw_trace, LOG2_COLS, 0);
 
-	pvda_glwe_download(res, res_gpu);
+	glwe_copy_to_host(res, res_gpu);
 	delete_glwe(res_gpu);
 
 	// Single free for the whole CMux-leaf block (glwe_tree_storage[] itself
@@ -291,7 +288,7 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 // Setup phase for the client in the protocol: secret and evaluation key
 // generation. Same protocol as example_PIR.c's client phase0 — encryption
 // itself is RNG-based and stays on the CPU — but the KSKs are NTT-prepared
-// directly on the GPU (see pvda_new_automorphism_key_device), a one-time
+// directly on the GPU (new_automorphism_key_on on the CUDA backend), a one-time
 // setup cost, so every later per-query dispatch (glwegadget_automorphism,
 // glwegadget_half_prod, ggsw_external_product) sees device-resident KSK
 // material and takes its GPU branch.
@@ -318,13 +315,13 @@ int onionpir_client_phase0(PvdaBackend* module, GLWESecretKeyPrepared** sk_prep_
 	for (uint64_t i = 1; (1ULL << i) <= NBASE; ++i)
 	{
 		int64_t p                = (int64_t)NBASE / (1LL << (i - 1)) + 1;
-		GLWEAutomorphismKey* ksk = pvda_new_automorphism_key_device(auto_ksk_params);
+		GLWEAutomorphismKey* ksk = new_automorphism_key_on(module, auto_ksk_params);
 		compute_automorphism_key(module, ksk, sk_prep, (int)p);
 		glwegadget_key_collection_put_key(ksks, ksk, p);
 	}
 
 	*ggsw_ksks_out = ggsw_ksks;
-	for (int i = 0; i < KBASE; ++i) ggsw_ksks[i] = pvda_new_ggsw_prep_device(auto_ggsw_params);
+	for (int i = 0; i < KBASE; ++i) ggsw_ksks[i] = new_ggsw_prep_on(module, auto_ggsw_params);
 	generate_glwegad_to_ggsw_ksk(module, ggsw_ksks, auto_ggsw_params, sk_prep);
 
 	status = 0;
@@ -383,9 +380,14 @@ int main(int argc, char* argv[])
 	double sigma8  = ldexp(1.0, 2 - 8 * KAPPABASE);
 	double sigma5  = ldexp(1.0, 2 - 5 * KAPPABASE);
 	double sigma6  = ldexp(1.0, 2 - 6 * KAPPABASE);
-	PvdaBackend* module = pvda_new_spqlios_backend(NBASE);
-
-	gpu_ntt_initialize(NBASE);
+	// Every object created with the *_on constructors on this backend lives on the GPU,
+	// and the operations applied to them run there
+	PvdaBackend* module = pvda_new_cuda_backend(NBASE);
+	if (!module)
+	{
+		printf("No CUDA device available\n");
+		exit(1);
+	}
 
 	// Automorphims keys
 	double ksk_sigma = sigma8;

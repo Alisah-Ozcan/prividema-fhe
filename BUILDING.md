@@ -32,6 +32,7 @@ ON/OFF options:
 - `BUILD_BENCHMARKS`: Build the benchmarks (requires C++ compiler)
 - `BUILD_NATIVE`: Enables -march=native optimisations, makes output NON-portable
 - `PROFILING_OPTIONS`: Adds debugging options and info even in Release builds, intended for profiling traces
+- `ENABLE_CUDA`: Builds the GPU (CUDA) backend, see the GPU backend documentation page (`docs/pages/030_gpu_backend.md`). Requires the CUDA toolkit; set `CMAKE_CUDA_ARCHITECTURES` to the target GPU (e.g. `89`) to shorten the build
 
 ### Building the tests
 
