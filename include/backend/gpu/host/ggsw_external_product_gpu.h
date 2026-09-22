@@ -136,13 +136,6 @@ GLWEGadgetCiphertext* pvda_glwegadget_upload(const GLWEGadgetCiphertext* host_gl
 // glwegadget_half_prod_prepared_to_dft. Free with delete_glwe_dft.
 GLWECiphertextDFT* pvda_new_glwe_dft_device(const GLWEParams* params);
 
-// New automorphism key whose gadgets are prepared on the GPU: pass it to
-// compute_automorphism_key, then use it with device GLWEs in
-// glwegadget_automorphism / glwe_trace_expand. The GPU (NTT) and CPU (FFT)
-// prepared forms are not interchangeable, so a key must be created for the
-// backend it will be used with. Free with delete_automorphism_key.
-GLWEAutomorphismKey* pvda_new_automorphism_key_device(GLWEGadgetParams* params);
-
 // ---------------------------------------------------------------------------
 // GPU external product — all pointer arguments must be CUDA device pointers.
 //

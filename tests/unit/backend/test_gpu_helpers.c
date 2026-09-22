@@ -91,7 +91,7 @@ Test(gpu_helpers, glwe_dft_device_alloc_and_delete)
 	delete_glwe_params(params);
 }
 
-// An automorphism with a key from pvda_new_automorphism_key_device on device
+// An automorphism with a key from new_automorphism_key_on (CUDA backend) on device
 // operands must decrypt to the same phase as the CPU automorphism.
 Test(gpu_helpers, automorphism_key_device_matches_cpu)
 {
@@ -108,7 +108,7 @@ Test(gpu_helpers, automorphism_key_device_matches_cpu)
 
 	const int p                  = 5;
 	GLWEAutomorphismKey* key_cpu = new_automorphism_key(gad_params);
-	GLWEAutomorphismKey* key_gpu = pvda_new_automorphism_key_device(gad_params);
+	GLWEAutomorphismKey* key_gpu = new_automorphism_key_on(module, gad_params);
 	cr_assert_not_null(key_gpu);
 	cr_assert_eq(compute_automorphism_key(module, key_cpu, sk_prep, p), 0);
 	cr_assert_eq(compute_automorphism_key(module, key_gpu, sk_prep, p), 0);
@@ -202,7 +202,7 @@ Test(gpu_helpers, mixed_operands_are_rejected)
 	cr_assert_eq(ggsw_unprepared_external_product(module, host_res, dev, ggsw), -1);
 
 	// GPU automorphism key applied to host GLWEs
-	GLWEAutomorphismKey* key_gpu = pvda_new_automorphism_key_device(gad_params);
+	GLWEAutomorphismKey* key_gpu = new_automorphism_key_on(module, gad_params);
 	cr_assert_eq(compute_automorphism_key(module, key_gpu, sk_prep, 5), 0);
 	cr_assert_eq(glwegadget_automorphism(module, host_res, key_gpu, host), -1);
 

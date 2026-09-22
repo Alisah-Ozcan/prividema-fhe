@@ -111,6 +111,11 @@ void pvda_gpu_memcpy(void* dst, const void* src, size_t bytes)
 	if (attr.type != cudaMemoryTypeDevice) CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
 }
 
+void pvda_gpu_memzero(void* ptr, size_t bytes)
+{
+	if (bytes) CUDA_CHECK(cudaMemsetAsync(ptr, 0, bytes, gpu_active_stream));
+}
+
 int pvda_gpu_available(void)
 {
 	int count = 0;

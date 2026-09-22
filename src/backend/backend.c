@@ -81,6 +81,69 @@ PvdaBackend* pvda_new_backend(PvdaBackendConfig config)
 
 PvdaBackendType pvda_backend_type(const PvdaBackend* backend) { return backend->type; }
 
+void* pvda_alloc_on(const PvdaBackend* backend, size_t bytes)
+{
+#ifdef ENABLE_CUDA
+	if (backend->type == PVDA_BACKEND_CUDA)
+	{
+		size_t n_elems = (bytes + sizeof(int64_t) - 1) / sizeof(int64_t);
+		int64_t* ptr   = pvda_gpu_alloc(n_elems ? n_elems : 1);
+		if (ptr) pvda_gpu_zero(ptr, n_elems);
+		return ptr;
+	}
+#endif
+	(void)backend;
+	return calloc(bytes ? bytes : 1, 1);
+}
+
+int pvda_is_gpu_memory(const void* ptr)
+{
+#ifdef ENABLE_CUDA
+	if (ptr) return pvda_is_device_pointer(ptr);
+#endif
+	(void)ptr;
+	return 0;
+}
+
+void pvda_free_any(void* ptr)
+{
+	if (!ptr) return;
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(ptr))
+	{
+		pvda_gpu_free((int64_t*)ptr);
+		return;
+	}
+#endif
+	free(ptr);
+}
+
+void pvda_memcpy_any(void* dst, const void* src, size_t bytes)
+{
+	if (bytes == 0) return;
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(dst) || pvda_is_device_pointer(src))
+	{
+		pvda_gpu_memcpy(dst, src, bytes);
+		return;
+	}
+#endif
+	memcpy(dst, src, bytes);
+}
+
+void pvda_memzero_any(void* ptr, size_t bytes)
+{
+	if (bytes == 0) return;
+#ifdef ENABLE_CUDA
+	if (pvda_is_device_pointer(ptr))
+	{
+		pvda_gpu_memzero(ptr, bytes);
+		return;
+	}
+#endif
+	memset(ptr, 0, bytes);
+}
+
 int pvda_on_gpu(const PvdaBackend* backend, const void* ptr)
 {
 #ifdef ENABLE_CUDA
@@ -103,15 +166,8 @@ void* pvda_alloc_like(const PvdaBackend* backend, const void* like, size_t bytes
 
 void pvda_memcpy(const PvdaBackend* backend, void* dst, const void* src, size_t bytes)
 {
-#ifdef ENABLE_CUDA
-	if (pvda_on_gpu(backend, dst) || pvda_on_gpu(backend, src))
-	{
-		pvda_gpu_memcpy(dst, src, bytes);
-		return;
-	}
-#endif
 	(void)backend;
-	memcpy(dst, src, bytes);
+	pvda_memcpy_any(dst, src, bytes);
 }
 
 int pvda_vmp_prepare_contiguous_placed(const PvdaBackend* backend, MatBivDFT** pmat, size_t pmat_bytes,
@@ -146,16 +202,8 @@ int pvda_vmp_prepare_contiguous_placed(const PvdaBackend* backend, MatBivDFT** p
 
 void pvda_free_like(const PvdaBackend* backend, void* ptr)
 {
-	if (!ptr) return;
-#ifdef ENABLE_CUDA
-	if (pvda_on_gpu(backend, ptr))
-	{
-		pvda_gpu_free((int64_t*)ptr);
-		return;
-	}
-#endif
 	(void)backend;
-	free(ptr);
+	pvda_free_any(ptr);
 }
 
 void pvda_delete_backend(PvdaBackend* backend)

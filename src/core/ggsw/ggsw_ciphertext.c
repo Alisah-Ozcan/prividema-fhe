@@ -15,10 +15,6 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
-#ifdef ENABLE_CUDA
-#include "gpu/host/ggsw_external_product_gpu.h"
-#endif
-
 // bivGGSW Part (begin)
 
 GGSWCiphertext* new_ggsw(const GGSWParams* params_ggsw)
@@ -43,46 +39,28 @@ cleanup:
 void delete_ggsw(GGSWCiphertext* ggsw)
 {
 	if (!ggsw) return;
-#ifdef ENABLE_CUDA
-	if (ggsw->mat && pvda_is_device_pointer(ggsw->mat))
-		pvda_gpu_free((int64_t*)ggsw->mat);
-	else
-		free(ggsw->mat);
-#else
-	free(ggsw->mat);
-#endif
+	pvda_free_any(ggsw->mat);  // host or GPU memory (new_ggsw_on)
 	free(ggsw);
 }
 
 GGSWCiphertext* new_ggsw_on(const PvdaBackend* backend, const GGSWParams* params_ggsw)
 {
-#ifdef ENABLE_CUDA
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_ggsw_device(params_ggsw);  // zeroed
-#endif
-	return new_ggsw(params_ggsw);
+	GGSWCiphertext* ggsw = malloc(sizeof(GGSWCiphertext));
+	if (!ggsw) return NULL;
+	ggsw->params = params_ggsw;
+	ggsw->mat    = pvda_alloc_on(backend, ggsw_coef_number(params_ggsw) * sizeof(int64_t));
+	if (!ggsw->mat)
+	{
+		free(ggsw);
+		return NULL;
+	}
+	return ggsw;
 }
 
 GGSWCiphertext* ggsw_clone_on(const PvdaBackend* backend, const GGSWCiphertext* src)
 {
-	size_t n_elems = ggsw_coef_number(src->params);
-#ifdef ENABLE_CUDA
-	int src_on_device = pvda_is_device_pointer(src->mat);
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
-	{
-		if (!src_on_device) return pvda_ggsw_upload(src);
-		GGSWCiphertext* dst = pvda_new_ggsw_device(src->params);
-		if (dst) pvda_gpu_copy((int64_t*)dst->mat, (const int64_t*)src->mat, n_elems);
-		return dst;
-	}
-	if (src_on_device)
-	{
-		GGSWCiphertext* dst = new_ggsw(src->params);
-		if (dst) pvda_gpu_download((int64_t*)dst->mat, (const int64_t*)src->mat, n_elems);
-		return dst;
-	}
-#endif
-	GGSWCiphertext* dst = new_ggsw(src->params);
-	if (dst) memcpy(dst->mat, src->mat, n_elems * sizeof(int64_t));
+	GGSWCiphertext* dst = new_ggsw_on(backend, src->params);
+	if (dst) pvda_memcpy_any(dst->mat, src->mat, ggsw_coef_number(src->params) * sizeof(int64_t));
 	return dst;
 }
 
@@ -203,23 +181,22 @@ cleanup:
 
 GGSWCiphertextPrep* new_ggsw_prep_on(const PvdaBackend* backend, const GGSWParams* params_ggsw)
 {
-#ifdef ENABLE_CUDA
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_ggsw_prep_device(params_ggsw);
-#endif
-	return new_ggsw_prep(params_ggsw);
+	GGSWCiphertextPrep* prep = malloc(sizeof(GGSWCiphertextPrep));
+	if (!prep) return NULL;
+	prep->params = params_ggsw;
+	prep->mat    = pvda_alloc_on(backend, 2 * ggsw_coef_number_dft(params_ggsw) * sizeof(double));
+	if (!prep->mat)
+	{
+		free(prep);
+		return NULL;
+	}
+	return prep;
 }
 
 void delete_ggsw_prep(GGSWCiphertextPrep* ggsw_dft)
 {
 	if (!ggsw_dft) return;
-#ifdef ENABLE_CUDA
-	if (ggsw_dft->mat && pvda_is_device_pointer(ggsw_dft->mat))
-		pvda_gpu_free((int64_t*)ggsw_dft->mat);
-	else
-		free(ggsw_dft->mat);
-#else
-	free(ggsw_dft->mat);
-#endif
+	pvda_free_any(ggsw_dft->mat);  // host or GPU memory (new_ggsw_prep_on, ggsw_prepare)
 	free(ggsw_dft);
 }
 

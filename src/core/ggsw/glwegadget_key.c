@@ -7,10 +7,6 @@
 #include "glwegadget_ciphertext.h"
 #include "utils.h"
 
-#ifdef ENABLE_CUDA
-#include "gpu/host/ggsw_external_product_gpu.h"
-#endif
-
 static inline int allocate_prepared_gadget_array(GLWEGadgetParams* params, GLWEGadgetCiphertextPrep** array, int n)
 {
 	int i = 0;
@@ -76,32 +72,23 @@ cleanup:
 
 GLWEAutomorphismKey* new_automorphism_key_on(const PvdaBackend* backend, GLWEGadgetParams* params)
 {
-#ifdef ENABLE_CUDA
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_automorphism_key_device(params);
-#endif
-	return new_automorphism_key(params);
-}
-
-#ifdef ENABLE_CUDA
-GLWEAutomorphismKey* pvda_new_automorphism_key_device(GLWEGadgetParams* params)
-{
 	GLWEAutomorphismKey* auto_key = new_automorphism_key(params);
 	CHECK_ALLOC(auto_key, "Automorphism key allocation failed");
+	if (pvda_backend_type(backend) == PVDA_BACKEND_SPQLIOS) return auto_key;
 
-	// A device placeholder in enc_s[i]->mat makes compute_automorphism_key
-	// prepare that gadget on the GPU (see its ENABLE_CUDA branch)
+	// Place the prepared gadgets on the backend: compute_automorphism_key then prepares them there
 	for (uint64_t i = 0; i < params->params_glwe->k; ++i)
 	{
-		delete_glwegadget_prep(auto_key->glwe_ksk->enc_s[i]);
-		auto_key->glwe_ksk->enc_s[i] = pvda_new_glwegadget_prep_device(params);
-		CHECK_ALLOC(auto_key->glwe_ksk->enc_s[i], "Device automorphism key allocation failed");
+		GLWEGadgetCiphertextPrep* gadget = auto_key->glwe_ksk->enc_s[i];
+		pvda_free_any(gadget->mat);
+		gadget->mat = pvda_alloc_on(backend, glwegadget_coef_number(params) * sizeof(MatBivDFT));
+		CHECK_ALLOC(gadget->mat, "Automorphism key allocation failed");
 	}
 	return auto_key;
 cleanup:
 	delete_automorphism_key(auto_key);
 	return NULL;
 }
-#endif
 
 void delete_automorphism_key(GLWEAutomorphismKey* automorphism_key)
 {

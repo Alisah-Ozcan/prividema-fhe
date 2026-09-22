@@ -68,9 +68,10 @@ GLWECiphertext* new_glwe_on(const PvdaBackend* backend, const GLWEParams* params
 GLWECiphertext* glwe_clone_on(const PvdaBackend* backend, const GLWECiphertext* src);
 
 /**
- * @brief Allocates a zero-initialized GLWE ciphertext on the same side (host or GPU memory) as another one
+ * @brief Allocates a GLWE ciphertext on the same side (host or GPU memory) as another one
  *
- * Used for the temporaries of an operation, which must live next to its operands. Free with delete_glwe.
+ * Used for the temporaries of an operation, which must live next to its operands: the content of a
+ * GPU-resident one is left uninitialized. Free with delete_glwe.
  *
  * @param backend      The backend
  * @param params_glwe  The GLWE parameters of the new ciphertext

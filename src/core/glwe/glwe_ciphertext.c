@@ -14,10 +14,6 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
-#ifdef ENABLE_CUDA
-#include "gpu/host/ggsw_external_product_gpu.h"
-#endif
-
 //! bivGLWE PART (begin)
 
 GLWECiphertext* new_glwe(const GLWEParams* params)
@@ -42,15 +38,7 @@ cleanup:
 void delete_glwe(GLWECiphertext* glwe)
 {
 	if (!glwe) return;
-#ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(glwe->vec))
-	{
-		pvda_gpu_free((int64_t*)glwe->vec);
-		free(glwe);
-		return;
-	}
-#endif
-	free(glwe->vec);
+	pvda_free_any(glwe->vec);  // host or GPU memory (new_glwe_on)
 	free(glwe);
 }
 
@@ -88,92 +76,64 @@ cleanup:
 
 GLWECiphertext* new_glwe_on(const PvdaBackend* backend, const GLWEParams* params)
 {
-#ifdef ENABLE_CUDA
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
+	GLWECiphertext* glwe = malloc(sizeof(GLWECiphertext));
+	if (!glwe) return NULL;
+	glwe->params = params;
+	glwe->vec    = pvda_alloc_on(backend, glwe_coef_number(params) * sizeof(int64_t));
+	if (!glwe->vec)
 	{
-		GLWECiphertext* glwe = pvda_new_glwe_device(params);
-		if (glwe) pvda_gpu_zero((int64_t*)glwe->vec, glwe_coef_number(params));
-		return glwe;
+		free(glwe);
+		return NULL;
 	}
-#endif
-	return new_glwe(params);
+	return glwe;
 }
 
 GLWECiphertext* new_glwe_like(const PvdaBackend* backend, const GLWEParams* params, const GLWECiphertext* like)
 {
-	return pvda_on_gpu(backend, like->vec) ? new_glwe_on(backend, params) : new_glwe(params);
+	if (!pvda_on_gpu(backend, like->vec)) return new_glwe(params);
+
+	// A temporary: no need to zero GPU memory
+	GLWECiphertext* glwe = malloc(sizeof(GLWECiphertext));
+	if (!glwe) return NULL;
+	glwe->params = params;
+	glwe->vec    = pvda_alloc_like(backend, like->vec, glwe_coef_number(params) * sizeof(int64_t));
+	if (!glwe->vec)
+	{
+		free(glwe);
+		return NULL;
+	}
+	return glwe;
 }
 
 GLWECiphertext* glwe_clone_on(const PvdaBackend* backend, const GLWECiphertext* src)
 {
-	GLWECiphertext* dst = NULL;
-#ifdef ENABLE_CUDA
-	int src_on_device = pvda_is_device_pointer(src->vec);
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
-	{
-		if (!src_on_device) return pvda_glwe_upload(src);
-		dst = pvda_new_glwe_device(src->params);
-		if (dst) pvda_gpu_copy((int64_t*)dst->vec, (const int64_t*)src->vec, glwe_coef_number(src->params));
-		return dst;
-	}
-	if (src_on_device)
-	{
-		dst = new_glwe(src->params);
-		if (dst) pvda_glwe_download(dst, src);
-		return dst;
-	}
-#endif
-	dst = new_glwe(src->params);
-	if (dst) memcpy(dst->vec, src->vec, glwe_coef_number(src->params) * sizeof(int64_t));
+	GLWECiphertext* dst = new_glwe_on(backend, src->params);
+	if (dst) pvda_memcpy_any(dst->vec, src->vec, glwe_coef_number(src->params) * sizeof(int64_t));
 	return dst;
 }
 
 void glwe_copy_to_host(GLWECiphertext* host_dst, const GLWECiphertext* src)
 {
 	assert(glwe_coef_number(host_dst->params) == glwe_coef_number(src->params));
-#ifdef ENABLE_CUDA
-	if (pvda_is_device_pointer(src->vec))
-	{
-		pvda_glwe_download(host_dst, src);
-		return;
-	}
-#endif
-	memcpy(host_dst->vec, src->vec, glwe_coef_number(src->params) * sizeof(int64_t));
+	pvda_memcpy_any(host_dst->vec, src->vec, glwe_coef_number(src->params) * sizeof(int64_t));
 }
 
 void glwe_copy(GLWECiphertext* dst, const GLWECiphertext* src)
 {
-	size_t src_elems = glwe_coef_number(src->params);
-	size_t dst_elems = glwe_coef_number(dst->params);
-
-#ifdef ENABLE_CUDA
-	int residency = PVDA_RESIDENCY(dst->vec, src->vec);
-	if (residency == PVDA_MIXED_RESIDENCY)
+	// Both in host memory or both in GPU memory (glwe_clone_on / glwe_copy_to_host move data across)
+	if (pvda_is_gpu_memory(dst->vec) != pvda_is_gpu_memory(src->vec))
 	{
 		log_message(LOG_ERROR, "glwe_copy: operands mix host and GPU memory");
 		return;
 	}
-	if (residency == PVDA_ON_DEVICE)
-	{
-		if (dst_elems <= src_elems)
-			pvda_gpu_copy((int64_t*)dst->vec, (const int64_t*)src->vec, dst_elems);
-		else
-		{
-			pvda_gpu_copy((int64_t*)dst->vec, (const int64_t*)src->vec, src_elems);
-			pvda_gpu_zero((int64_t*)dst->vec + src_elems, dst_elems - src_elems);
-		}
-		return;
-	}
-#endif
-
-	size_t src_size = src_elems * sizeof(int64_t);
-	size_t dst_size = dst_elems * sizeof(int64_t);
+	size_t src_size = glwe_coef_number(src->params) * sizeof(int64_t);
+	size_t dst_size = glwe_coef_number(dst->params) * sizeof(int64_t);
 	if (dst_size <= src_size)
-		memcpy(dst->vec, src->vec, dst_size);
+		pvda_memcpy_any(dst->vec, src->vec, dst_size);
 	else
 	{
-		memcpy(dst->vec, src->vec, src_size);
-		memset(((uint8_t*)dst->vec) + src_size, 0, dst_size - src_size);
+		pvda_memcpy_any(dst->vec, src->vec, src_size);
+		pvda_memzero_any((uint8_t*)dst->vec + src_size, dst_size - src_size);
 	}
 }
 PolyBiv glwe_extract_poly_view(const GLWECiphertext* glwe_ct, uint64_t pos)
@@ -223,24 +183,22 @@ cleanup:
 
 GLWECiphertextDFT* new_glwe_dft_on(const PvdaBackend* backend, const GLWEParams* params)
 {
-#ifdef ENABLE_CUDA
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_glwe_dft_device(params);
-#endif
-	return new_glwe_dft(params);
+	GLWECiphertextDFT* glwe_dft = malloc(sizeof(GLWECiphertextDFT));
+	if (!glwe_dft) return NULL;
+	glwe_dft->params = params;
+	glwe_dft->vec    = pvda_alloc_on(backend, glwe_coef_number_dft(params) * 2 * sizeof(double));
+	if (!glwe_dft->vec)
+	{
+		free(glwe_dft);
+		return NULL;
+	}
+	return glwe_dft;
 }
 
 void delete_glwe_dft(GLWECiphertextDFT* glwe)
 {
 	if (!glwe) return;
-#ifdef ENABLE_CUDA
-	if (glwe->vec && pvda_is_device_pointer(glwe->vec))
-	{
-		pvda_gpu_free((int64_t*)glwe->vec);
-		free(glwe);
-		return;
-	}
-#endif
-	free(glwe->vec);
+	pvda_free_any(glwe->vec);  // host or GPU memory (new_glwe_dft_on)
 	free(glwe);
 }
 

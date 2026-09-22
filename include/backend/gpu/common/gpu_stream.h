@@ -50,6 +50,9 @@ int pvda_gpu_available(void);
 // the data is readable when dst is host memory.
 void pvda_gpu_memcpy(void* dst, const void* src, size_t bytes);
 
+// Zeroes bytes of GPU memory, on the active stream.
+void pvda_gpu_memzero(void* ptr, size_t bytes);
+
 #ifdef __cplusplus
 }
 #endif

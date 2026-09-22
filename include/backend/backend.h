@@ -75,6 +75,35 @@ PvdaBackend* pvda_new_backend(PvdaBackendConfig config);
 PvdaBackendType pvda_backend_type(const PvdaBackend* backend);
 
 /**
+ * @brief Allocates a zero-initialized buffer on a backend: GPU memory on a CUDA backend, host memory otherwise
+ *
+ * @return NULL in case of failure, the new buffer otherwise. Free with pvda_free_any
+ */
+void* pvda_alloc_on(const PvdaBackend* backend, size_t bytes);
+
+/**
+ * @brief Tells whether a buffer is in GPU memory (always 0 in a build without ENABLE_CUDA)
+ */
+int pvda_is_gpu_memory(const void* ptr);
+
+/**
+ * @brief Frees a buffer in host memory (from malloc and the like) or in GPU memory
+ */
+void pvda_free_any(void* ptr);
+
+/**
+ * @brief Copies bytes between two buffers, each in host or GPU memory
+ *
+ * Returns once the data is readable when dst is host memory.
+ */
+void pvda_memcpy_any(void* dst, const void* src, size_t bytes);
+
+/**
+ * @brief Zeroes bytes of a buffer in host or GPU memory
+ */
+void pvda_memzero_any(void* ptr, size_t bytes);
+
+/**
  * @brief Tells whether a buffer is in GPU memory, as seen by a backend
  *
  * @return 1 for GPU memory on a CUDA backend, 0 otherwise (always 0 on a spqlios backend)

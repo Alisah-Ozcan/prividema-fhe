@@ -15,10 +15,6 @@
 #include "univariate_polynomial.h"
 #include "utils.h"
 
-#ifdef ENABLE_CUDA
-#include "gpu/host/ggsw_external_product_gpu.h"
-#endif
-
 GLWEGadgetCiphertext* new_glwegadget(const GLWEGadgetParams* params)
 {
 	GLWEGadgetCiphertext* glwegadget = calloc(sizeof(GLWEGadgetCiphertext), 1);
@@ -37,52 +33,29 @@ cleanup:
 
 GLWEGadgetCiphertext* new_glwegadget_on(const PvdaBackend* backend, const GLWEGadgetParams* params)
 {
-#ifdef ENABLE_CUDA
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
+	GLWEGadgetCiphertext* glwegadget = malloc(sizeof(GLWEGadgetCiphertext));
+	if (!glwegadget) return NULL;
+	glwegadget->params = params;
+	glwegadget->mat    = pvda_alloc_on(backend, glwegadget_coef_number(params) * sizeof(MatBiv));
+	if (!glwegadget->mat)
 	{
-		GLWEGadgetCiphertext* glwegadget = pvda_new_glwegadget_device(params);
-		if (glwegadget) pvda_gpu_zero((int64_t*)glwegadget->mat, glwegadget_coef_number(params));
-		return glwegadget;
+		free(glwegadget);
+		return NULL;
 	}
-#endif
-	return new_glwegadget(params);
+	return glwegadget;
 }
 
 GLWEGadgetCiphertext* glwegadget_clone_on(const PvdaBackend* backend, const GLWEGadgetCiphertext* src)
 {
-	size_t n_elems = glwegadget_coef_number(src->params);
-#ifdef ENABLE_CUDA
-	int src_on_device = pvda_is_device_pointer(src->mat);
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA)
-	{
-		if (!src_on_device) return pvda_glwegadget_upload(src);
-		GLWEGadgetCiphertext* dst = pvda_new_glwegadget_device(src->params);
-		if (dst) pvda_gpu_copy((int64_t*)dst->mat, (const int64_t*)src->mat, n_elems);
-		return dst;
-	}
-	if (src_on_device)
-	{
-		GLWEGadgetCiphertext* dst = new_glwegadget(src->params);
-		if (dst) pvda_gpu_download((int64_t*)dst->mat, (const int64_t*)src->mat, n_elems);
-		return dst;
-	}
-#endif
-	GLWEGadgetCiphertext* dst = new_glwegadget(src->params);
-	if (dst) memcpy(dst->mat, src->mat, n_elems * sizeof(int64_t));
+	GLWEGadgetCiphertext* dst = new_glwegadget_on(backend, src->params);
+	if (dst) pvda_memcpy_any(dst->mat, src->mat, glwegadget_coef_number(src->params) * sizeof(MatBiv));
 	return dst;
 }
 
 void delete_glwegadget(GLWEGadgetCiphertext* glwegadget_ct)
 {
 	if (!glwegadget_ct) return;
-#ifdef ENABLE_CUDA
-	if (glwegadget_ct->mat && pvda_is_device_pointer(glwegadget_ct->mat))
-		pvda_gpu_free((int64_t*)glwegadget_ct->mat);
-	else
-		free(glwegadget_ct->mat);
-#else
-	free(glwegadget_ct->mat);
-#endif
+	pvda_free_any(glwegadget_ct->mat);  // host or GPU memory (new_glwegadget_on)
 	free(glwegadget_ct);
 }
 
@@ -121,23 +94,22 @@ cleanup:
 
 GLWEGadgetCiphertextPrep* new_glwegadget_prep_on(const PvdaBackend* backend, const GLWEGadgetParams* params)
 {
-#ifdef ENABLE_CUDA
-	if (pvda_backend_type(backend) == PVDA_BACKEND_CUDA) return pvda_new_glwegadget_prep_device(params);
-#endif
-	return new_glwegadget_prep(params);
+	GLWEGadgetCiphertextPrep* prep = malloc(sizeof(GLWEGadgetCiphertextPrep));
+	if (!prep) return NULL;
+	prep->params = params;
+	prep->mat    = pvda_alloc_on(backend, glwegadget_coef_number(params) * sizeof(MatBivDFT));
+	if (!prep->mat)
+	{
+		free(prep);
+		return NULL;
+	}
+	return prep;
 }
 
 void delete_glwegadget_prep(GLWEGadgetCiphertextPrep* glwegadget_prep_ct)
 {
 	if (!glwegadget_prep_ct) return;
-#ifdef ENABLE_CUDA
-	if (glwegadget_prep_ct->mat && pvda_is_device_pointer(glwegadget_prep_ct->mat))
-		pvda_gpu_free((int64_t*)glwegadget_prep_ct->mat);
-	else
-		free(glwegadget_prep_ct->mat);
-#else
-	free(glwegadget_prep_ct->mat);
-#endif
+	pvda_free_any(glwegadget_prep_ct->mat);  // host or GPU memory (new_glwegadget_prep_on, glwegadget_prepare)
 	free(glwegadget_prep_ct);
 }
 

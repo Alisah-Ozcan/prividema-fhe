@@ -9,39 +9,12 @@
 #include "math_utils.h"
 #include "utils.h"
 
-#ifdef ENABLE_CUDA
-#include "gpu/host/ggsw_external_product_gpu.h"  // pvda_is_device_pointer / pvda_new_glwe_device
-#endif
-
-// Allocates a temporary/intermediate GLWE, on the GPU when on_device is set. CMux inputs may
-// live in GPU device memory (when the caller wants the CMux, or a whole CMux tree, to run on
-// the GPU through the GPU dispatch of sub/normalize/external product/add) — temporaries must
-// then also be device-resident, since new_glwe always allocates host memory.
-static GLWECiphertext* hebits_new_glwe(const GLWEParams* params, int on_device)
-{
-#ifdef ENABLE_CUDA
-	if (on_device) return pvda_new_glwe_device(params);
-#endif
-	(void)on_device;
-	return new_glwe(params);
-}
-
-static int hebits_is_on_device(const GLWECiphertext* glwe)
-{
-#ifdef ENABLE_CUDA
-	return pvda_is_device_pointer(glwe->vec);
-#else
-	(void)glwe;
-	return 0;
-#endif
-}
-
 int hebits_cmux_unprepared(const PvdaBackend* module, GLWECiphertext* res, const GLWECiphertext* c0,
                            const GLWECiphertext* c1, const GGSWCiphertext* sel, int normalize_sub)
 {
 	int status = -1;
 
-	GLWECiphertext* tmp_glwe = hebits_new_glwe(c1->params, hebits_is_on_device(c1));
+	GLWECiphertext* tmp_glwe = new_glwe_like(module, c1->params, c1);
 	CHECK_ALLOC(tmp_glwe, "Allocation failed in unprepared CMux");
 
 	sub_glwe(module, tmp_glwe, c1, c0);
@@ -60,7 +33,7 @@ int hebits_cmux(const PvdaBackend* module, GLWECiphertext* res, const GLWECipher
 {
 	int status = -1;
 
-	GLWECiphertext* tmp_glwe = hebits_new_glwe(c1->params, hebits_is_on_device(c1));
+	GLWECiphertext* tmp_glwe = new_glwe_like(module, c1->params, c1);
 	CHECK_ALLOC(tmp_glwe, "Allocation failed in unprepared CMux");
 
 	sub_glwe(module, tmp_glwe, c1, c0);
@@ -79,8 +52,6 @@ int hebits_cmux_tree(const PvdaBackend* module, GLWECiphertext* res, const GLWEC
 {
 	GLWEParams* aggregation_params = res->params;
 	int64_t log_inp_cols           = next_pow2_log(inp_cols);
-	// Decided once up front: with delete_src the leaves are freed after the first level
-	int use_gpu = inp_cols > 0 && hebits_is_on_device(src[0]);
 
 	GLWECiphertext* glwe_tree[(log_inp_cols + 1)][inp_cols];  //Inefficient, suffices for now
 	memset(glwe_tree, 0, (log_inp_cols + 1) * inp_cols * sizeof(GLWECiphertext*));
@@ -106,7 +77,7 @@ int hebits_cmux_tree(const PvdaBackend* module, GLWECiphertext* res, const GLWEC
 		else
 			for (int c = 0; c < (used_cols + 1) / 2; ++c)
 			{
-				glwe_tree[l + 1][c] = hebits_new_glwe(aggregation_params, use_gpu);
+				glwe_tree[l + 1][c] = new_glwe_like(module, aggregation_params, res);
 				CHECK_ALLOC(glwe_tree[l + 1][c], "GLWE allocation failed in a CMux tree");
 			}
 
