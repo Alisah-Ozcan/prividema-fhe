@@ -288,11 +288,8 @@ int glwegadget_automorphism(const PvdaBackend* module, GLWECiphertext* result, c
 			// case to worry about: just add over their common limb count.)
 			PolyBiv result_b   = glwe_extract_poly_view(result, k);
 			uint64_t add_limbs = result_b.l < biv_l ? result_b.l : biv_l;
-			for (uint64_t i = 0; i < add_limbs; ++i)
-			{
-				int64_t* row = (int64_t*)(result_b.ptr + (int64_t)i * result_b.stride);
-				gpu_vec_znx_add_device(row, d_auto_tmp + (int64_t)i * nn, row, nn);
-			}
+			gpu_vec_znx_add_strided_device((const int64_t*)result_b.ptr, result_b.stride, d_auto_tmp, (int64_t)nn,
+			                               (int64_t*)result_b.ptr, result_b.stride, nn, add_limbs);
 		}
 		else
 		{
@@ -330,11 +327,8 @@ int glwegadget_automorphism(const PvdaBackend* module, GLWECiphertext* result, c
 			// result += auto_tmp ==> result = -sum_i(halfProd(c_auto(s), auto(a_i))) + (0, auto(b))
 			PolyBiv result_b   = glwe_extract_poly_view(result, k);
 			uint64_t add_limbs = result_b.l < biv_l ? result_b.l : biv_l;
-			for (uint64_t i = 0; i < add_limbs; ++i)
-			{
-				int64_t* row = (int64_t*)(result_b.ptr + (int64_t)i * result_b.stride);
-				gpu_vec_znx_add_device(row, d_auto_tmp + (int64_t)i * nn, row, nn);
-			}
+			gpu_vec_znx_add_strided_device((const int64_t*)result_b.ptr, result_b.stride, d_auto_tmp, (int64_t)nn,
+			                               (int64_t*)result_b.ptr, result_b.stride, nn, add_limbs);
 		}
 
 		// gpu_vec_znx_automorphism_device already synchronizes internally
@@ -570,11 +564,8 @@ static void glwegadget_automorphism_gpu_batched(GLWECiphertext* result, const GL
 		// result += auto_tmp
 		PolyBiv result_b   = glwe_extract_poly_view(result, k);
 		uint64_t add_limbs = result_b.l < biv_l ? result_b.l : biv_l;
-		for (uint64_t i = 0; i < add_limbs; ++i)
-		{
-			int64_t* row = (int64_t*)(result_b.ptr + (int64_t)i * result_b.stride);
-			gpu_vec_znx_add_device(row, scratch_auto_tmp + (int64_t)i * nn, row, nn);
-		}
+		gpu_vec_znx_add_strided_device((const int64_t*)result_b.ptr, result_b.stride, scratch_auto_tmp, (int64_t)nn,
+		                               (int64_t*)result_b.ptr, result_b.stride, nn, add_limbs);
 	}
 	else
 	{
@@ -612,11 +603,8 @@ static void glwegadget_automorphism_gpu_batched(GLWECiphertext* result, const GL
 		// result += auto_tmp
 		PolyBiv result_b   = glwe_extract_poly_view(result, k);
 		uint64_t add_limbs = result_b.l < biv_l ? result_b.l : biv_l;
-		for (uint64_t i = 0; i < add_limbs; ++i)
-		{
-			int64_t* row = (int64_t*)(result_b.ptr + (int64_t)i * result_b.stride);
-			gpu_vec_znx_add_device(row, scratch_auto_tmp + (int64_t)i * nn, row, nn);
-		}
+		gpu_vec_znx_add_strided_device((const int64_t*)result_b.ptr, result_b.stride, scratch_auto_tmp, (int64_t)nn,
+		                               (int64_t*)result_b.ptr, result_b.stride, nn, add_limbs);
 	}
 }
 

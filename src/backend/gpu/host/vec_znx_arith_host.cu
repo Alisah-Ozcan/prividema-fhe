@@ -94,6 +94,19 @@ void gpu_vec_znx_add_device(const int64_t* a_dev, const int64_t* b_dev, int64_t*
 	CUDA_CHECK(cudaGetLastError());
 }
 
+void gpu_vec_znx_add_strided_device(const int64_t* a_dev, int64_t a_stride, const int64_t* b_dev, int64_t b_stride,
+                                    int64_t* res_dev, int64_t res_stride, size_t n, size_t limbs)
+{
+	size_t total = n * limbs;
+	if (total == 0) return;
+	int threads = 256;
+	int blocks  = ((int)total + threads - 1) / threads;
+
+	vec_znx_add_strided_kernel<<<blocks, threads, 0, gpu_active_stream>>>(res_dev, res_stride, a_dev, a_stride, b_dev,
+	                                                                      b_stride, (int)n, (int)total);
+	CUDA_CHECK(cudaGetLastError());
+}
+
 void gpu_vec_znx_sub_device(const int64_t* a_dev, const int64_t* b_dev, int64_t* res_dev, size_t total)
 {
 	int threads = 256;

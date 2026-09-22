@@ -42,6 +42,13 @@ void gpu_vec_znx_add_device(const int64_t* a_dev, const int64_t* b_dev, int64_t*
 
 void gpu_vec_znx_sub_device(const int64_t* a_dev, const int64_t* b_dev, int64_t* res_dev, size_t total);
 
+// res = a + b over `limbs` limbs of n coefficients, limb i of each operand
+// starting at i*{a,b,res}_stride (e.g. one polynomial of an interleaved GLWE,
+// stride (k+1)*n), in a single kernel launch. Does not synchronize, like
+// gpu_vec_znx_add_device.
+void gpu_vec_znx_add_strided_device(const int64_t* a_dev, int64_t a_stride, const int64_t* b_dev, int64_t b_stride,
+                                    int64_t* res_dev, int64_t res_stride, size_t n, size_t limbs);
+
 void gpu_vec_znx_negate_device(const int64_t* a_dev, int64_t* res_dev, size_t total);
 
 // Sized device-pointer variants — mirror spqlios' vec_znx_add_ref /
