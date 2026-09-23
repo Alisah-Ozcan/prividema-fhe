@@ -190,7 +190,7 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	}
 	packed_glwegadget_trace_expand(module, gptrs, MATRIX_ROWS, L_TILDE_Q1, row_query_dev, ksks);
 
-	GLWEGadgetCiphertextPrep* glwegad_trace = new_glwegadget_prep(mega_params);
+	GLWEGadgetCiphertextPrep* glwegad_trace = new_glwegadget_prep_on(module, mega_params);
 	glwegadget_prepare(module, glwegad_trace, row_trace_unprep);
 
 	delete_glwegadget(row_trace_unprep);
@@ -252,7 +252,7 @@ int onionpir_server_gpu(const PvdaBackend* module, const GGSWParams* ggsw_ksk_pa
 	GGSWCiphertextPrep* ggsw_trace[LOG2_COLS] = {0};
 	for (int r = 0; r < LOG2_COLS; ++r)
 	{
-		ggsw_trace[r] = new_ggsw_prep(ggsw_ksk_params);
+		ggsw_trace[r] = new_ggsw_prep_on(module, ggsw_ksk_params);
 		ggsw_prepare(module, ggsw_trace[r], ggsw_trace_raw[r]);
 		delete_ggsw(ggsw_trace_raw[r]);
 	}
