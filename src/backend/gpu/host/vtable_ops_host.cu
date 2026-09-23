@@ -128,103 +128,121 @@ extern "C" {
 void gpu_vt_vec_znx_add(int64_t* res, size_t res_l, int64_t res_sl, const int64_t* a, size_t a_l, int64_t a_sl,
                         const int64_t* b, size_t b_l, int64_t b_sl, size_t n)
 {
-	if (res_l == 0) return;
-	vec_znx_addsub_kernel<<<blocks_for(res_l * n), kThreads, 0, gpu_active_stream>>>(
-	    res, (int)res_l, res_sl, a, (int)a_l, a_sl, b, (int)b_l, b_sl, (int)n, 1);
-	CUDA_CHECK(cudaGetLastError());
+	return pvda_gpu_guard([&]() -> void {
+		if (res_l == 0) return;
+		vec_znx_addsub_kernel<<<blocks_for(res_l * n), kThreads, 0, gpu_active_stream>>>(
+		    res, (int)res_l, res_sl, a, (int)a_l, a_sl, b, (int)b_l, b_sl, (int)n, 1);
+		CUDA_CHECK(cudaGetLastError());
+	});
 }
 
 void gpu_vt_vec_znx_sub(int64_t* res, size_t res_l, int64_t res_sl, const int64_t* a, size_t a_l, int64_t a_sl,
                         const int64_t* b, size_t b_l, int64_t b_sl, size_t n)
 {
-	if (res_l == 0) return;
-	vec_znx_addsub_kernel<<<blocks_for(res_l * n), kThreads, 0, gpu_active_stream>>>(
-	    res, (int)res_l, res_sl, a, (int)a_l, a_sl, b, (int)b_l, b_sl, (int)n, -1);
-	CUDA_CHECK(cudaGetLastError());
+	return pvda_gpu_guard([&]() -> void {
+		if (res_l == 0) return;
+		vec_znx_addsub_kernel<<<blocks_for(res_l * n), kThreads, 0, gpu_active_stream>>>(
+		    res, (int)res_l, res_sl, a, (int)a_l, a_sl, b, (int)b_l, b_sl, (int)n, -1);
+		CUDA_CHECK(cudaGetLastError());
+	});
 }
 
 void gpu_vt_vec_znx_negate(int64_t* res, size_t res_l, int64_t res_sl, const int64_t* a, size_t a_l, int64_t a_sl,
                            size_t n)
 {
-	if (res_l == 0) return;
-	vec_znx_negate_kernel_strided<<<blocks_for(res_l * n), kThreads, 0, gpu_active_stream>>>(res, (int)res_l, res_sl, a,
-	                                                                                         (int)a_l, a_sl, (int)n);
-	CUDA_CHECK(cudaGetLastError());
+	return pvda_gpu_guard([&]() -> void {
+		if (res_l == 0) return;
+		vec_znx_negate_kernel_strided<<<blocks_for(res_l * n), kThreads, 0, gpu_active_stream>>>(
+		    res, (int)res_l, res_sl, a, (int)a_l, a_sl, (int)n);
+		CUDA_CHECK(cudaGetLastError());
+	});
 }
 
 void gpu_vt_vec_znx_dft(int64_t* res_ntt, size_t res_size, const int64_t* a, size_t a_l, int64_t a_sl, size_t n)
 {
-	size_t rows = a_l < res_size ? a_l : res_size;
-	if (rows > 0)
-	{
-		NttContext ctx = ntt_context(n);
-		if (a_sl == (int64_t)n)
+	return pvda_gpu_guard([&]() -> void {
+		size_t rows = a_l < res_size ? a_l : res_size;
+		if (rows > 0)
 		{
-			gpuntt::GPU_NTT((Data64s*)a, (Data64*)res_ntt, ctx.ntt_table, ctx.mod, ctx.fwd, (int)rows);
+			NttContext ctx = ntt_context(n);
+			if (a_sl == (int64_t)n)
+			{
+				gpuntt::GPU_NTT((Data64s*)a, (Data64*)res_ntt, ctx.ntt_table, ctx.mod, ctx.fwd, (int)rows);
+			}
+			else
+			{
+				VEC_GPU<int64_t> packed(rows * n);
+				copy_limbs(packed.data(), (int64_t)n, a, a_sl, rows, n);
+				gpuntt::GPU_NTT((Data64s*)packed.data(), (Data64*)res_ntt, ctx.ntt_table, ctx.mod, ctx.fwd, (int)rows);
+			}
 		}
-		else
-		{
-			VEC_GPU<int64_t> packed(rows * n);
-			copy_limbs(packed.data(), (int64_t)n, a, a_sl, rows, n);
-			gpuntt::GPU_NTT((Data64s*)packed.data(), (Data64*)res_ntt, ctx.ntt_table, ctx.mod, ctx.fwd, (int)rows);
-		}
-	}
-	zero_limbs(res_ntt, rows, res_size, (int64_t)n, n);
+		zero_limbs(res_ntt, rows, res_size, (int64_t)n, n);
+	});
 }
 
 void gpu_vt_vec_znx_idft(int64_t* res, size_t res_l, int64_t res_sl, const int64_t* a_ntt, size_t a_size, size_t n)
 {
-	size_t rows = a_size < res_l ? a_size : res_l;
-	if (rows > 0)
-	{
-		NttContext ctx = ntt_context(n);
-		if (res_sl == (int64_t)n)
+	return pvda_gpu_guard([&]() -> void {
+		size_t rows = a_size < res_l ? a_size : res_l;
+		if (rows > 0)
 		{
-			gpuntt::GPU_INTT((Data64*)a_ntt, (Data64s*)res, ctx.intt_table, ctx.mod, ctx.inv, (int)rows);
+			NttContext ctx = ntt_context(n);
+			if (res_sl == (int64_t)n)
+			{
+				gpuntt::GPU_INTT((Data64*)a_ntt, (Data64s*)res, ctx.intt_table, ctx.mod, ctx.inv, (int)rows);
+			}
+			else
+			{
+				VEC_GPU<int64_t> packed(rows * n);
+				gpuntt::GPU_INTT((Data64*)a_ntt, (Data64s*)packed.data(), ctx.intt_table, ctx.mod, ctx.inv, (int)rows);
+				copy_limbs(res, res_sl, packed.data(), (int64_t)n, rows, n);
+			}
 		}
-		else
-		{
-			VEC_GPU<int64_t> packed(rows * n);
-			gpuntt::GPU_INTT((Data64*)a_ntt, (Data64s*)packed.data(), ctx.intt_table, ctx.mod, ctx.inv, (int)rows);
-			copy_limbs(res, res_sl, packed.data(), (int64_t)n, rows, n);
-		}
-	}
-	zero_limbs(res, rows, res_l, res_sl, n);
+		zero_limbs(res, rows, res_l, res_sl, n);
+	});
 }
 
 void gpu_vt_vmp_prepare(int64_t* pmat, const int64_t* mat, size_t nrows, size_t ncols, size_t n)
 {
-	if (nrows * ncols == 0) return;
-	NttContext ctx = ntt_context(n);
-	gpuntt::GPU_NTT((Data64s*)mat, (Data64*)pmat, ctx.ntt_table, ctx.mod, ctx.fwd, (int)(nrows * ncols));
+	return pvda_gpu_guard([&]() -> void {
+		if (nrows * ncols == 0) return;
+		NttContext ctx = ntt_context(n);
+		gpuntt::GPU_NTT((Data64s*)mat, (Data64*)pmat, ctx.ntt_table, ctx.mod, ctx.fwd, (int)(nrows * ncols));
+	});
 }
 
 void gpu_vt_vmp_apply_ntt(int64_t* res_ntt, size_t res_size, const int64_t* a_ntt, size_t a_rows, const int64_t* pmat,
                           size_t nrows, size_t ncols, size_t n)
 {
-	if (res_size == 0) return;
-	NttContext ctx = ntt_context(n);
-	size_t rows    = a_rows < nrows ? a_rows : nrows;
-	vmp_ntt_kernel<<<blocks_for(res_size * n), kThreads, 0, gpu_active_stream>>>(
-	    (Data64*)res_ntt, (int)res_size, (const Data64*)a_ntt, (int)rows, (const Data64*)pmat, (int)ncols, (int)n,
-	    ctx.mod);
-	CUDA_CHECK(cudaGetLastError());
+	return pvda_gpu_guard([&]() -> void {
+		if (res_size == 0) return;
+		NttContext ctx = ntt_context(n);
+		size_t rows    = a_rows < nrows ? a_rows : nrows;
+		vmp_ntt_kernel<<<blocks_for(res_size * n), kThreads, 0, gpu_active_stream>>>(
+		    (Data64*)res_ntt, (int)res_size, (const Data64*)a_ntt, (int)rows, (const Data64*)pmat, (int)ncols, (int)n,
+		    ctx.mod);
+		CUDA_CHECK(cudaGetLastError());
+	});
 }
 
 void gpu_vt_svp_prepare(int64_t* ppol, const int64_t* pol, size_t n)
 {
-	NttContext ctx = ntt_context(n);
-	gpuntt::GPU_NTT((Data64s*)pol, (Data64*)ppol, ctx.ntt_table, ctx.mod, ctx.fwd, 1);
+	return pvda_gpu_guard([&]() -> void {
+		NttContext ctx = ntt_context(n);
+		gpuntt::GPU_NTT((Data64s*)pol, (Data64*)ppol, ctx.ntt_table, ctx.mod, ctx.fwd, 1);
+	});
 }
 
 void gpu_vt_svp_apply_ntt(int64_t* res_ntt, size_t res_size, const int64_t* ppol, const int64_t* a_ntt, size_t a_size,
                           size_t n)
 {
-	if (res_size == 0) return;
-	NttContext ctx = ntt_context(n);
-	svp_ntt_kernel<<<blocks_for(res_size * n), kThreads, 0, gpu_active_stream>>>(
-	    (Data64*)res_ntt, (int)res_size, (const Data64*)ppol, (const Data64*)a_ntt, (int)a_size, (int)n, ctx.mod);
-	CUDA_CHECK(cudaGetLastError());
+	return pvda_gpu_guard([&]() -> void {
+		if (res_size == 0) return;
+		NttContext ctx = ntt_context(n);
+		svp_ntt_kernel<<<blocks_for(res_size * n), kThreads, 0, gpu_active_stream>>>(
+		    (Data64*)res_ntt, (int)res_size, (const Data64*)ppol, (const Data64*)a_ntt, (int)a_size, (int)n, ctx.mod);
+		CUDA_CHECK(cudaGetLastError());
+	});
 }
 
 }  // extern "C"

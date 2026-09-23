@@ -108,6 +108,21 @@ for them. Call `pvda_gpu_device_synchronize()` before reading a wall-clock timer
 work. Independent work can be spread over streams with `pvda_gpu_stream_push` /
 `pvda_gpu_stream_pop` (see `examples/example_PIR_gpu_stream.c`).
 
+## Errors
+
+A failing GPU operation (out of memory, a CUDA error, ...) never aborts the program. The
+failure is recorded and the operation reports it the way the rest of the library does: an
+allocation returns NULL and an operation of the backend returns -1, with a message in the log.
+
+```c
+GLWECiphertext* ct = new_glwe_on(backend, params);
+if (!ct) { /* out of GPU memory */ }
+if (ggsw_external_product(backend, res, ct, sel) != 0) { /* see pvda_gpu_last_error() */ }
+```
+
+`pvda_gpu_take_error()` tells whether a GPU failure happened since the last call (and clears
+the flag), `pvda_gpu_last_error()` returns its message. Both are per-thread.
+
 ## GPU memory
 
 GPU buffers come from a stream-ordered memory pool (`cudaMallocAsync`). Freed memory stays

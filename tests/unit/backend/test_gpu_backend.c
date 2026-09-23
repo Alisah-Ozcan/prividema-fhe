@@ -20,6 +20,7 @@
 #include "core/glwe/glwe_params.h"
 #include "core/glwe/glwe_transform_key.h"
 #include "core/glwe/univariate_polynomial.h"
+#include "gpu/common/gpu_stream.h"
 #include "gpu/host/ggsw_external_product_gpu.h"
 #include "rng.h"
 
@@ -323,4 +324,34 @@ Test(gpu_backend, host_only_use_does_not_initialize_cuda)
 	int active         = 1;
 	cr_assert_eq(cuDevicePrimaryCtxGetState(dev, &flags, &active), CUDA_SUCCESS);
 	cr_assert_eq(active, 0, "host-only use created a CUDA context");
+}
+
+// A failing GPU operation reports the failure instead of aborting the program
+Test(gpu_backend, gpu_failures_are_reported)
+{
+	PvdaBackend* gpu   = pvda_new_cuda_backend(NN);
+	GLWEParams* params = new_glwe_params(NN, 1, KAPPA, LIMBS, 0, NOISE_UNIFORM_POWER_OF_TWO);
+
+	// An allocation that cannot fit returns NULL and records the failure
+	cr_assert_eq(pvda_gpu_take_error(), 0, "no failure expected yet");
+	cr_assert_null(pvda_gpu_alloc((size_t)1 << 45), "an impossible allocation should fail");
+	cr_assert_eq(pvda_gpu_take_error(), 1, "the failure should be recorded");
+	cr_assert(gt(sz, strlen(pvda_gpu_last_error()), 0), "the failure should have a message");
+	cr_assert_eq(pvda_gpu_take_error(), 0, "taking the failure should clear it");
+
+	// A failing operation returns -1
+	GLWECiphertext* a   = new_glwe_on(gpu, params);
+	GLWECiphertext* res = new_glwe_on(gpu, params);
+	PolyBiv broken      = new_biv_view(NN, (uint64_t)1 << 40, NN, (PolyBivUnderlying*)a->vec);  // absurd limb count
+	PolyBiv ok          = glwe_flattened_biv(res);
+	cr_assert_eq(pvda_vec_znx_add(gpu, &ok, &broken, &broken), -1, "a failing operation should return -1");
+
+	// The backend still works afterwards
+	cr_assert_eq(pvda_vec_znx_add(gpu, &ok, &ok, &ok), 0, "the backend should still work");
+	cr_assert_eq(normalize_glwe(gpu, res, a), 0);
+
+	delete_glwe(res);
+	delete_glwe(a);
+	delete_glwe_params(params);
+	pvda_delete_backend(gpu);
 }

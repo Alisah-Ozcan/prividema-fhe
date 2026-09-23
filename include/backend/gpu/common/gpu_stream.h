@@ -46,6 +46,24 @@ void pvda_gpu_release_cached_memory(void);
 // Returns 1 if a CUDA device can be used, 0 otherwise (never throws).
 int pvda_gpu_available(void);
 
+// ---------------------------------------------------------------------------
+// Error reporting
+//
+// A failing GPU operation (out of memory, a CUDA error, ...) never aborts the
+// program: it records the failure here and returns NULL or 0. Operations of
+// the CUDA backend turn a recorded failure into their usual -1 return, so the
+// library's error handling is the same on both backends.
+// ---------------------------------------------------------------------------
+
+// Records a GPU failure (used by the GPU implementations).
+void pvda_gpu_record_error(const char* message);
+
+// Returns 1 if a GPU operation failed since the last call, and clears the flag.
+int pvda_gpu_take_error(void);
+
+// The message of the last recorded failure, "" if there is none. Valid until the next failure.
+const char* pvda_gpu_last_error(void);
+
 // Returns 1 if ptr points into GPU memory allocated by the library (pvda_gpu_alloc and the GPU
 // objects), 0 otherwise. Does not use the CUDA runtime, so it is cheap and never initializes CUDA.
 int pvda_gpu_owns(const void* ptr);

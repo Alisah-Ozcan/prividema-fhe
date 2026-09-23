@@ -31,6 +31,11 @@
 			break;                         \
 	}
 
+// A GPU operation records its failures (gpu_stream.h) instead of aborting: clear any stale
+// one before running, and report a new one as this operation's -1
+#define GPU_RUN()  pvda_gpu_take_error()
+#define GPU_DONE() return pvda_gpu_take_error() ? -1 : 0
+
 static uint64_t nn_of(const PvdaBackend* backend) { return backend->host_vt.pvda_module_extract_nn(backend); }
 
 // --- Allocations: the table's buffers are host buffers (see cuda_alias.h) ---
@@ -96,24 +101,27 @@ static void cuda_delete_vmp_pmat(const PvdaBackend* backend, MatBivDFT* pmat)
 static int cuda_vec_znx_dft(const PvdaBackend* backend, PolyBivDFT* res, uint64_t res_size, const PolyBiv* a)
 {
 	DISPATCH("pvda_vec_znx_dft", WHERE(res, a->ptr), backend->host_vt.pvda_vec_znx_dft(backend, res, res_size, a));
+	GPU_RUN();
 	gpu_vt_vec_znx_dft((int64_t*)res, res_size, a->ptr, a->l, a->stride, a->nn);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_vec_znx_idft(const PvdaBackend* backend, PolyBiv* res, const PolyBivDFT* a_dft, uint64_t a_size)
 {
 	DISPATCH("pvda_vec_znx_idft", WHERE(res->ptr, a_dft),
 	         backend->host_vt.pvda_vec_znx_idft(backend, res, a_dft, a_size));
+	GPU_RUN();
 	gpu_vt_vec_znx_idft(res->ptr, res->l, res->stride, (const int64_t*)a_dft, a_size, res->nn);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_svp_prepare(const PvdaBackend* backend, PolyUnivDFT* prepared_pol, const int64_t* pol)
 {
 	DISPATCH("pvda_svp_prepare", WHERE(prepared_pol, pol),
 	         backend->host_vt.pvda_svp_prepare(backend, prepared_pol, pol));
+	GPU_RUN();
 	gpu_vt_svp_prepare((int64_t*)prepared_pol, pol, nn_of(backend));
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_svp_apply_dft(const PvdaBackend* backend, const PolyBivDFT* res, uint64_t res_size,
@@ -121,12 +129,14 @@ static int cuda_svp_apply_dft(const PvdaBackend* backend, const PolyBivDFT* res,
 {
 	DISPATCH("pvda_svp_apply_dft", WHERE(res, prepared_pol, a->ptr),
 	         backend->host_vt.pvda_svp_apply_dft(backend, res, res_size, prepared_pol, a));
+	GPU_RUN();
 	uint64_t rows  = a->l < res_size ? a->l : res_size;
 	int64_t* a_ntt = pvda_gpu_alloc(rows * a->nn);
+	if (!a_ntt) return -1;
 	gpu_vt_vec_znx_dft(a_ntt, rows, a->ptr, a->l, a->stride, a->nn);
 	gpu_vt_svp_apply_ntt((int64_t*)res, res_size, (const int64_t*)prepared_pol, a_ntt, rows, a->nn);
 	pvda_gpu_free(a_ntt);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_svp_apply_dft_to_dft(const PvdaBackend* backend, const PolyBivDFT* res, uint64_t res_size,
@@ -134,8 +144,9 @@ static int cuda_svp_apply_dft_to_dft(const PvdaBackend* backend, const PolyBivDF
 {
 	DISPATCH("pvda_svp_apply_dft_to_dft", WHERE(res, ppol, a),
 	         backend->host_vt.pvda_svp_apply_dft_to_dft(backend, res, res_size, ppol, a, a_size));
+	GPU_RUN();
 	gpu_vt_svp_apply_ntt((int64_t*)res, res_size, (const int64_t*)ppol, (const int64_t*)a, a_size, nn_of(backend));
-	return 0;
+	GPU_DONE();
 }
 
 // --- Vector-matrix products ---
@@ -145,8 +156,9 @@ static int cuda_vmp_prepare_contiguous(const PvdaBackend* backend, MatBivDFT* pm
 {
 	DISPATCH("pvda_vmp_prepare_contiguous", WHERE(pmat, mat),
 	         backend->host_vt.pvda_vmp_prepare_contiguous(backend, pmat, mat, nrows, ncols));
+	GPU_RUN();
 	gpu_vt_vmp_prepare((int64_t*)pmat, mat, nrows, ncols, nn_of(backend));
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_vmp_apply_dft(const PvdaBackend* backend, PolyBivDFT* res, uint64_t res_size, const PolyBiv* a,
@@ -154,12 +166,14 @@ static int cuda_vmp_apply_dft(const PvdaBackend* backend, PolyBivDFT* res, uint6
 {
 	DISPATCH("pvda_vmp_apply_dft", WHERE(res, a->ptr, pmat),
 	         backend->host_vt.pvda_vmp_apply_dft(backend, res, res_size, a, pmat, nrows, ncols));
+	GPU_RUN();
 	uint64_t rows  = a->l < nrows ? a->l : nrows;
 	int64_t* a_ntt = pvda_gpu_alloc((rows ? rows : 1) * a->nn);
+	if (!a_ntt) return -1;
 	gpu_vt_vec_znx_dft(a_ntt, rows, a->ptr, a->l, a->stride, a->nn);
 	gpu_vt_vmp_apply_ntt((int64_t*)res, res_size, a_ntt, rows, (const int64_t*)pmat, nrows, ncols, a->nn);
 	pvda_gpu_free(a_ntt);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_vmp_apply_dft_to_dft(const PvdaBackend* backend, VecBivDFT* res, const uint64_t res_size,
@@ -168,9 +182,10 @@ static int cuda_vmp_apply_dft_to_dft(const PvdaBackend* backend, VecBivDFT* res,
 {
 	DISPATCH("pvda_vmp_apply_dft_to_dft", WHERE(res, a_dft, pmat),
 	         backend->host_vt.pvda_vmp_apply_dft_to_dft(backend, res, res_size, a_dft, a_size, pmat, nrows, ncols));
+	GPU_RUN();
 	gpu_vt_vmp_apply_ntt((int64_t*)res, res_size, (const int64_t*)a_dft, a_size, (const int64_t*)pmat, nrows, ncols,
 	                     nn_of(backend));
-	return 0;
+	GPU_DONE();
 }
 
 // On the GPU a prepared vector (pvda_vmp_prepare_vec) is the NTT of the vector
@@ -181,17 +196,19 @@ static int cuda_vmp_apply_prepared_to_dft(const PvdaBackend* backend, VecBivDFT*
 	DISPATCH(
 	    "pvda_vmp_apply_prepared_to_dft", WHERE(res, a_prep, pmat),
 	    backend->host_vt.pvda_vmp_apply_prepared_to_dft(backend, res, res_size, a_prep, a_size, pmat, nrows, ncols));
+	GPU_RUN();
 	gpu_vt_vmp_apply_ntt((int64_t*)res, res_size, (const int64_t*)a_prep, a_size, (const int64_t*)pmat, nrows, ncols,
 	                     nn_of(backend));
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_vmp_prepare_vec(const PvdaBackend* backend, PolyBivPrep* pvec, uint64_t nrows, const PolyBiv* a)
 {
 	DISPATCH("pvda_vmp_prepare_vec", WHERE(pvec, a->ptr),
 	         backend->host_vt.pvda_vmp_prepare_vec(backend, pvec, nrows, a));
+	GPU_RUN();
 	gpu_vt_vec_znx_dft((int64_t*)pvec, nrows, a->ptr, a->l, a->stride, a->nn);
-	return 0;
+	GPU_DONE();
 }
 
 // --- Coefficient domain ---
@@ -201,9 +218,10 @@ static int cuda_vec_znx_normalize_base2k(const PvdaBackend* backend, uint64_t lo
 {
 	DISPATCH("pvda_vec_znx_normalize_base2k", WHERE(res->ptr, a->ptr),
 	         backend->host_vt.pvda_vec_znx_normalize_base2k(backend, log2_base2k, res, a));
+	GPU_RUN();
 	gpu_normalize_base2k_sized_device(a->ptr, a->l, a->stride, res->ptr, res->l, res->stride, a->nn,
 	                                  (uint32_t)log2_base2k);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_znx_small_product(const PvdaBackend* backend, PolyUniv* res, const PolyUniv* a, const PolyUniv* b)
@@ -216,47 +234,53 @@ static int cuda_znx_small_product(const PvdaBackend* backend, PolyUniv* res, con
 static int cuda_vec_znx_negate(const PvdaBackend* backend, PolyBiv* res, const PolyBiv* a)
 {
 	DISPATCH("pvda_vec_znx_negate", WHERE(res->ptr, a->ptr), backend->host_vt.pvda_vec_znx_negate(backend, res, a));
+	GPU_RUN();
 	gpu_vt_vec_znx_negate(res->ptr, res->l, res->stride, a->ptr, a->l, a->stride, res->nn);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_vec_znx_add(const PvdaBackend* backend, PolyBiv* res, const PolyBiv* a, const PolyBiv* b)
 {
 	DISPATCH("pvda_vec_znx_add", WHERE(res->ptr, a->ptr, b->ptr),
 	         backend->host_vt.pvda_vec_znx_add(backend, res, a, b));
+	GPU_RUN();
 	gpu_vt_vec_znx_add(res->ptr, res->l, res->stride, a->ptr, a->l, a->stride, b->ptr, b->l, b->stride, res->nn);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_vec_znx_sub(const PvdaBackend* backend, PolyBiv* res, const PolyBiv* a, const PolyBiv* b)
 {
 	DISPATCH("pvda_vec_znx_sub", WHERE(res->ptr, a->ptr, b->ptr),
 	         backend->host_vt.pvda_vec_znx_sub(backend, res, a, b));
+	GPU_RUN();
 	gpu_vt_vec_znx_sub(res->ptr, res->l, res->stride, a->ptr, a->l, a->stride, b->ptr, b->l, b->stride, res->nn);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_znx_automorphism(const PvdaBackend* backend, const int64_t p, PolyUniv* res, const PolyUniv* a)
 {
 	DISPATCH("pvda_znx_automorphism", WHERE(res, a), backend->host_vt.pvda_znx_automorphism(backend, p, res, a));
+	GPU_RUN();
 	uint64_t nn = nn_of(backend);
 	gpu_vec_znx_automorphism_device(p, a, res, nn, 1, (int64_t)nn, 1, (int64_t)nn);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_vec_znx_automorphism(const PvdaBackend* backend, const int64_t p, PolyBiv* res, const PolyBiv* a)
 {
 	DISPATCH("pvda_vec_znx_automorphism", WHERE(res->ptr, a->ptr),
 	         backend->host_vt.pvda_vec_znx_automorphism(backend, p, res, a));
+	GPU_RUN();
 	gpu_vec_znx_automorphism_device(p, a->ptr, res->ptr, res->nn, res->l, res->stride, a->l, a->stride);
-	return 0;
+	GPU_DONE();
 }
 
 static int cuda_vec_znx_rotate(const PvdaBackend* backend, const int64_t p, PolyBiv* res, const PolyBiv* a)
 {
 	DISPATCH("pvda_vec_znx_rotate", WHERE(res->ptr, a->ptr), backend->host_vt.pvda_vec_znx_rotate(backend, p, res, a));
+	GPU_RUN();
 	gpu_vec_znx_rotate_device(p, a->ptr, res->ptr, res->nn, res->l, res->stride, a->l, a->stride);
-	return 0;
+	GPU_DONE();
 }
 
 void pvda_fill_cuda(struct pvda_virtual_table* vt)

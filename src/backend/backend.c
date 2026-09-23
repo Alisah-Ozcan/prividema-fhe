@@ -185,12 +185,14 @@ int pvda_vmp_prepare_contiguous_placed(const PvdaBackend* backend, MatBivDFT** p
 		{
 			free(*pmat);
 			*pmat = (MatBivDFT*)pvda_gpu_alloc((pmat_bytes + sizeof(int64_t) - 1) / sizeof(int64_t));
+			if (!*pmat) return -1;
 		}
 		int64_t* uploaded = NULL;
 		if (!pvda_on_gpu(backend, mat))
 		{
 			size_t n_elems = nrows * ncols * pvda_module_extract_nn(backend);
 			uploaded       = pvda_gpu_upload(mat, n_elems);
+			if (!uploaded) return -1;
 			mat            = uploaded;
 		}
 		int status = pvda_vmp_prepare_contiguous(backend, *pmat, mat, nrows, ncols);

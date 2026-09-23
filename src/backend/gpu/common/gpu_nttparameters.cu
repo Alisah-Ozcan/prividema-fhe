@@ -105,12 +105,16 @@ void gpu_ntt_initialize(size_t n) { NTTParameterGenerator::instance().initialize
 
 const uint64_t* gpu_ntt_get_table(size_t n)
 {
-	return reinterpret_cast<const uint64_t*>(NTTParameterGenerator::instance().get_ntt_table(n));
+	return pvda_gpu_guard([&]() -> const uint64_t* {
+		return reinterpret_cast<const uint64_t*>(NTTParameterGenerator::instance().get_ntt_table(n));
+	});
 }
 
 const uint64_t* gpu_ntt_get_intt_table(size_t n)
 {
-	return reinterpret_cast<const uint64_t*>(NTTParameterGenerator::instance().get_intt_table(n));
+	return pvda_gpu_guard([&]() -> const uint64_t* {
+		return reinterpret_cast<const uint64_t*>(NTTParameterGenerator::instance().get_intt_table(n));
+	});
 }
 
 uint64_t gpu_ntt_get_modulus(void) { return NTTParameterGenerator::instance().get_modulus().value; }

@@ -3,9 +3,14 @@
 #include <cstdlib>
 #include <map>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "gpu/common/gpu_common.h"
+
+extern "C" {
+#include "logger.h"  // C header without extern "C" guards
+}
 #include "gpu/common/gpu_stream.h"
 
 thread_local cudaStream_t gpu_active_stream = 0;
@@ -84,21 +89,45 @@ extern "C" int pvda_gpu_owns(const void* ptr)
 	return (uintptr_t)ptr < it->first + it->second;
 }
 
+namespace {
+// Per-thread record of the last GPU failure (see gpu_stream.h)
+thread_local std::string last_error;
+thread_local bool error_pending = false;
+}  // namespace
+
+extern "C" void pvda_gpu_record_error(const char* message)
+{
+	last_error    = message ? message : "unknown GPU error";
+	error_pending = true;
+	log_message(LOG_ERROR, last_error.c_str());
+}
+
+extern "C" int pvda_gpu_take_error(void)
+{
+	bool had      = error_pending;
+	error_pending = false;
+	return had ? 1 : 0;
+}
+
+extern "C" const char* pvda_gpu_last_error(void) { return last_error.c_str(); }
+
 void* pvda_device_alloc_bytes(size_t bytes)
 {
-	(void)default_mempool();  // configures the pool's release threshold on first use
-	void* ptr       = nullptr;
-	cudaError_t err = cudaMallocAsync(&ptr, bytes, gpu_active_stream);
-	if (err == cudaErrorMemoryAllocation)
-	{
-		// Out of memory: give every cached block back to the driver and retry once.
-		(void)cudaGetLastError();
-		pvda_gpu_release_cached_memory();
-		err = cudaMallocAsync(&ptr, bytes, gpu_active_stream);
-	}
-	CUDA_CHECK(err);
-	register_block(ptr, bytes);
-	return ptr;
+	return pvda_gpu_guard([&]() -> void* {
+		(void)default_mempool();  // configures the pool's release threshold on first use
+		void* ptr       = nullptr;
+		cudaError_t err = cudaMallocAsync(&ptr, bytes, gpu_active_stream);
+		if (err == cudaErrorMemoryAllocation)
+		{
+			// Out of memory: give every cached block back to the driver and retry once.
+			(void)cudaGetLastError();
+			pvda_gpu_release_cached_memory();
+			err = cudaMallocAsync(&ptr, bytes, gpu_active_stream);
+		}
+		CUDA_CHECK(err);
+		register_block(ptr, bytes);
+		return ptr;
+	});
 }
 
 // The block is only reused once the work already queued on gpu_active_stream
@@ -109,43 +138,53 @@ void* pvda_device_alloc_bytes(size_t bytes)
 // after the CUDA runtime has already shut down at program exit.
 void pvda_device_free_bytes(void* ptr)
 {
-	if (!ptr) return;
-	unregister_block(ptr);
-	(void)cudaFreeAsync(ptr, gpu_active_stream);
+	return pvda_gpu_guard([&]() -> void {
+		if (!ptr) return;
+		unregister_block(ptr);
+		(void)cudaFreeAsync(ptr, gpu_active_stream);
+	});
 }
 
 extern "C" {
 
 void* pvda_gpu_stream_create(void)
 {
-	cudaStream_t stream = nullptr;
-	CUDA_CHECK(cudaStreamCreate(&stream));
-	return (void*)stream;
+	return pvda_gpu_guard([&]() -> void* {
+		cudaStream_t stream = nullptr;
+		CUDA_CHECK(cudaStreamCreate(&stream));
+		return (void*)stream;
+	});
 }
 
 void pvda_gpu_stream_destroy(void* stream)
 {
-	if (!stream) return;
-	CUDA_CHECK(cudaStreamDestroy((cudaStream_t)stream));
+	return pvda_gpu_guard([&]() -> void {
+		if (!stream) return;
+		CUDA_CHECK(cudaStreamDestroy((cudaStream_t)stream));
+	});
 }
 
 void pvda_gpu_stream_synchronize(void* stream) { CUDA_CHECK(cudaStreamSynchronize((cudaStream_t)stream)); }
 
 void pvda_gpu_stream_push(void* stream)
 {
-	gpu_stream_stack.push_back(gpu_active_stream);
-	gpu_active_stream = (cudaStream_t)stream;
+	return pvda_gpu_guard([&]() -> void {
+		gpu_stream_stack.push_back(gpu_active_stream);
+		gpu_active_stream = (cudaStream_t)stream;
+	});
 }
 
 void pvda_gpu_stream_pop(void)
 {
-	if (gpu_stream_stack.empty())
-	{
-		fprintf(stderr, "pvda_gpu_stream_pop: stack underflow (pop without matching push)\n");
-		abort();
-	}
-	gpu_active_stream = gpu_stream_stack.back();
-	gpu_stream_stack.pop_back();
+	return pvda_gpu_guard([&]() -> void {
+		if (gpu_stream_stack.empty())
+		{
+			fprintf(stderr, "pvda_gpu_stream_pop: stack underflow (pop without matching push)\n");
+			abort();
+		}
+		gpu_active_stream = gpu_stream_stack.back();
+		gpu_stream_stack.pop_back();
+	});
 }
 
 void* pvda_gpu_stream_get_active(void) { return (void*)gpu_active_stream; }
@@ -154,33 +193,41 @@ void pvda_gpu_device_synchronize(void) { CUDA_CHECK(cudaDeviceSynchronize()); }
 
 void pvda_gpu_memcpy(void* dst, const void* src, size_t bytes)
 {
-	if (bytes == 0) return;
-	CUDA_CHECK(cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDefault, gpu_active_stream));
-	cudaPointerAttributes attr{};
-	CUDA_CHECK(cudaPointerGetAttributes(&attr, dst));
-	if (attr.type != cudaMemoryTypeDevice) CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
+	return pvda_gpu_guard([&]() -> void {
+		if (bytes == 0) return;
+		CUDA_CHECK(cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDefault, gpu_active_stream));
+		cudaPointerAttributes attr{};
+		CUDA_CHECK(cudaPointerGetAttributes(&attr, dst));
+		if (attr.type != cudaMemoryTypeDevice) CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
+	});
 }
 
 void pvda_gpu_memzero(void* ptr, size_t bytes)
 {
-	if (bytes) CUDA_CHECK(cudaMemsetAsync(ptr, 0, bytes, gpu_active_stream));
+	return pvda_gpu_guard([&]() -> void {
+		if (bytes) CUDA_CHECK(cudaMemsetAsync(ptr, 0, bytes, gpu_active_stream));
+	});
 }
 
 int pvda_gpu_available(void)
 {
-	int count = 0;
-	if (cudaGetDeviceCount(&count) != cudaSuccess)
-	{
-		(void)cudaGetLastError();
-		return 0;
-	}
-	return count > 0;
+	return pvda_gpu_guard([&]() -> int {
+		int count = 0;
+		if (cudaGetDeviceCount(&count) != cudaSuccess)
+		{
+			(void)cudaGetLastError();
+			return 0;
+		}
+		return count > 0;
+	});
 }
 
 void pvda_gpu_release_cached_memory(void)
 {
-	CUDA_CHECK(cudaDeviceSynchronize());
-	CUDA_CHECK(cudaMemPoolTrimTo(default_mempool(), 0));
+	return pvda_gpu_guard([&]() -> void {
+		CUDA_CHECK(cudaDeviceSynchronize());
+		CUDA_CHECK(cudaMemPoolTrimTo(default_mempool(), 0));
+	});
 }
 
 }  // extern "C"

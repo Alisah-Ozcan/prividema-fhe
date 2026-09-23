@@ -35,4 +35,4 @@ target_include_directories(PVDA_GPU
         ${PROJECT_SOURCE_DIR}/include/core/ggsw
 )
 
-target_link_libraries(PVDA_GPU PUBLIC CUDA::cudart GPUNTT::ntt)
+target_link_libraries(PVDA_GPU PUBLIC CUDA::cudart GPUNTT::ntt PRIVATE PVDA_COMMON)  # PVDA_COMMON: the logger

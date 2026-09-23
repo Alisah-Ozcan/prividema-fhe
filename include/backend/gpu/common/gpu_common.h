@@ -9,8 +9,28 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include "gpu/common/gpu_stream.h"
+
+// Runs f, turning any failure into a recorded GPU error (pvda_gpu_record_error) and a
+// NULL / zero result: GPU failures must not escape into the C code that calls them.
+template <typename F>
+auto pvda_gpu_guard(F&& f) -> decltype(f())
+{
+	using Result = decltype(f());
+	try
+	{
+		return f();
+	} catch (const std::exception& error)
+	{
+		pvda_gpu_record_error(error.what());
+	} catch (...)
+	{
+		pvda_gpu_record_error("unknown GPU error");
+	}
+	if constexpr (!std::is_void_v<Result>) return Result{};
+}
 
 class CudaException : public std::exception {
    public:
