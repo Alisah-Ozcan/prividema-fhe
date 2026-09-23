@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "gpu/common/gpu_stream.h"
+
 // Forward declarations — avoids pulling in core headers here.
 typedef struct glwe_ciphertext GLWECiphertext;
 typedef struct glwe_ciphertext_dft GLWECiphertextDFT;
@@ -33,8 +35,11 @@ int pvda_is_device_pointer(const void* ptr);
 
 static inline int pvda_residency(int n, const void* const* ptrs)
 {
+	// pvda_gpu_owns (a lookup in the library's block registry) rather than
+	// pvda_is_device_pointer (a CUDA call): the operands of the core operations are the
+	// library's own buffers, and this runs on every operation (7 ns vs 155 ns)
 	int n_device = 0;
-	for (int i = 0; i < n; ++i) n_device += pvda_is_device_pointer(ptrs[i]);
+	for (int i = 0; i < n; ++i) n_device += pvda_gpu_owns(ptrs[i]);
 	return n_device == 0 ? PVDA_ON_HOST : n_device == n ? PVDA_ON_DEVICE : PVDA_MIXED_RESIDENCY;
 }
 

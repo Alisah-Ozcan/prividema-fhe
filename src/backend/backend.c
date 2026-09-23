@@ -151,7 +151,7 @@ void pvda_memzero_any(void* ptr, size_t bytes)
 int pvda_on_gpu(const PvdaBackend* backend, const void* ptr)
 {
 #ifdef ENABLE_CUDA
-	if (backend->type == PVDA_BACKEND_CUDA && ptr) return pvda_is_device_pointer(ptr);
+	if (backend->type == PVDA_BACKEND_CUDA && ptr) return pvda_gpu_owns(ptr);
 #endif
 	(void)backend;
 	(void)ptr;
