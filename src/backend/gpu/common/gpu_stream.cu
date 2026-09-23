@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <map>
 #include <mutex>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,14 @@ void register_block(void* ptr, size_t bytes)
 	live_blocks.fetch_add(1, std::memory_order_relaxed);
 }
 
+size_t block_size(const void* ptr)
+{
+	BlockRegistry& r = block_registry();
+	std::lock_guard<std::mutex> lock(r.mutex);
+	auto it = r.blocks.find((uintptr_t)ptr);
+	return it == r.blocks.end() ? 0 : it->second;
+}
+
 void unregister_block(void* ptr)
 {
 	BlockRegistry& r = block_registry();
@@ -111,9 +120,75 @@ extern "C" int pvda_gpu_take_error(void)
 
 extern "C" const char* pvda_gpu_last_error(void) { return last_error.c_str(); }
 
+namespace {
+// Blocks freed by the library are kept here, per stream and exact size, instead of going back
+// to the driver: the GPU operations allocate and free the same few sizes over and over (the
+// scratch of every automorphism, half-product, ...) and a cudaMallocAsync costs microseconds of
+// CPU time, which dominates those small operations. A block is only reused on the stream it was
+// freed on, so its reuse stays ordered after the work that used it.
+//
+// The cache holds at most PVDA_GPU_SCRATCH_CACHE_MB (default 1024) MiB; beyond that, and on
+// pvda_gpu_release_cached_memory, blocks go back to the driver.
+struct ScratchCache
+{
+	std::mutex mutex;
+	std::map<std::pair<cudaStream_t, size_t>, std::vector<void*>> blocks;
+	size_t cached_bytes = 0;
+	size_t limit_bytes  = [] {
+        const char* env = std::getenv("PVDA_GPU_SCRATCH_CACHE_MB");
+        return (size_t)(env ? std::strtoull(env, nullptr, 10) : 1024) << 20;
+	}();
+};
+ScratchCache& scratch_cache()
+{
+	static ScratchCache* cache = new ScratchCache;  // never destroyed: blocks may be freed at exit
+	return *cache;
+}
+
+// Takes a cached block of exactly `bytes` for the active stream, or nullptr
+void* take_cached(size_t bytes)
+{
+	ScratchCache& c = scratch_cache();
+	std::lock_guard<std::mutex> lock(c.mutex);
+	auto it = c.blocks.find({gpu_active_stream, bytes});
+	if (it == c.blocks.end() || it->second.empty()) return nullptr;
+	void* ptr = it->second.back();
+	it->second.pop_back();
+	c.cached_bytes -= bytes;
+	return ptr;
+}
+
+// Keeps a block for reuse on the active stream; returns false when the cache is full
+bool keep_cached(void* ptr, size_t bytes)
+{
+	ScratchCache& c = scratch_cache();
+	std::lock_guard<std::mutex> lock(c.mutex);
+	if (c.cached_bytes + bytes > c.limit_bytes) return false;
+	c.blocks[{gpu_active_stream, bytes}].push_back(ptr);
+	c.cached_bytes += bytes;
+	return true;
+}
+
+// Returns every cached block to the driver (the caller synchronizes first)
+void drop_cached()
+{
+	ScratchCache& c = scratch_cache();
+	std::lock_guard<std::mutex> lock(c.mutex);
+	for (auto& entry : c.blocks)
+		for (void* ptr : entry.second) (void)cudaFreeAsync(ptr, entry.first.first);
+	c.blocks.clear();
+	c.cached_bytes = 0;
+}
+}  // namespace
+
 void* pvda_device_alloc_bytes(size_t bytes)
 {
 	return pvda_gpu_guard([&]() -> void* {
+		if (void* cached = take_cached(bytes))
+		{
+			register_block(cached, bytes);
+			return cached;
+		}
 		(void)default_mempool();  // configures the pool's release threshold on first use
 		void* ptr       = nullptr;
 		cudaError_t err = cudaMallocAsync(&ptr, bytes, gpu_active_stream);
@@ -140,7 +215,9 @@ void pvda_device_free_bytes(void* ptr)
 {
 	return pvda_gpu_guard([&]() -> void {
 		if (!ptr) return;
+		size_t bytes = block_size(ptr);
 		unregister_block(ptr);
+		if (bytes && keep_cached(ptr, bytes)) return;  // kept for reuse
 		(void)cudaFreeAsync(ptr, gpu_active_stream);
 	});
 }
@@ -226,6 +303,7 @@ void pvda_gpu_release_cached_memory(void)
 {
 	return pvda_gpu_guard([&]() -> void {
 		CUDA_CHECK(cudaDeviceSynchronize());
+		drop_cached();
 		CUDA_CHECK(cudaMemPoolTrimTo(default_mempool(), 0));
 	});
 }
