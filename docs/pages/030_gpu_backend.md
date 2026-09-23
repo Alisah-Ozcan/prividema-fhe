@@ -126,13 +126,21 @@ the flag), `pvda_gpu_last_error()` returns its message. Both are per-thread.
 ## GPU memory
 
 GPU buffers come from a stream-ordered memory pool (`cudaMallocAsync`). Freed memory stays
-cached for reuse, which keeps the many short-lived buffers of the GPU operations cheap. The
-cache is unbounded by default; when an allocation runs out of memory the cache is emptied and
-the allocation retried.
+cached for reuse, which keeps the many short-lived buffers of the GPU operations cheap: a freed
+block is first kept by the library itself, for the stream it was freed on, and handed out again
+to the next allocation of the same size; what the library does not keep stays cached in the
+driver's pool. When an allocation runs out of memory both caches are emptied and the allocation
+is retried.
 
-- `PVDA_GPU_POOL_CACHE_MB=<MiB>` bounds the cache, useful when several processes share the
-  GPU (e.g. running the unit tests in parallel).
+- `PVDA_GPU_SCRATCH_CACHE_MB=<MiB>` bounds the library's cache of freed blocks (default 1024).
+- `PVDA_GPU_POOL_CACHE_MB=<MiB>` bounds the driver pool's cache, useful when several processes
+  share the GPU (e.g. running the unit tests in parallel).
 - `pvda_gpu_release_cached_memory()` returns all cached, unused memory to the driver.
+
+Prepared objects that will be used on the GPU should be created with the `*_on` constructors
+(`new_glwegadget_prep_on`, `new_ggsw_prep_on`, ...). Preparing into a host object on a CUDA
+backend still works — the matrix is moved to the GPU — but it allocates and frees the whole
+prepared matrix on the host first, which for a large gadget costs more than the preparation.
 
 ## Examples
 
