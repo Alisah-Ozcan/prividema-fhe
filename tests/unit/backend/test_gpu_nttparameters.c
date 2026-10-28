@@ -5,7 +5,7 @@
 #include "gpu/common/gpu_nttparameters.h"
 #include "gpu/host/ggsw_external_product_gpu.h"
 
-#define CARRIER_PRIME 1152921504634109953ULL
+#define CARRIER_PRIME 576460752364240897ULL
 
 // ---------------------------------------------------------------------------
 // Test 1: Singleton initializes tables — pointers non-null, modulus correct
