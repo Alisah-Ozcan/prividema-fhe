@@ -8,10 +8,11 @@
  * @file cuda_alias.h
  *
  * Virtual table of the CUDA backend. The opaque backend objects (DFT vectors, prepared
- * polynomials, vectors and matrices) are allocated in GPU memory and the operations on them run
- * on the GPU. The coefficient-domain vectors (ZnxVec) stay in host memory: they are uploaded to
- * the GPU for an operation that also involves GPU objects, and the coefficient-domain operations
- * themselves run on the embedded spqlios backend (the backend's host_vt).
+ * polynomials, vectors and matrices) are allocated in GPU memory. Every operation with a GPU
+ * implementation runs on the GPU: the coefficient-domain vectors (ZnxVec), which stay in host
+ * memory, are uploaded for it and a host result is downloaded. znx_small_product (no GPU
+ * implementation), the RNG and the number-theory entries run on the embedded spqlios backend (the
+ * backend's host_vt).
  */
 
 /**

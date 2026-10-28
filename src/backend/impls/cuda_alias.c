@@ -85,6 +85,45 @@ static int znx_download(const ZnxVec* res, const int64_t* src)
 	return 0;
 }
 
+// *dev = res when res is in GPU memory, else a view of a contiguous GPU buffer *tmp for the result
+static int znx_result_on_gpu(ZnxVec* dev, int64_t** tmp, const ZnxVec* res)
+{
+	*dev = *res;
+	*tmp = NULL;
+	if (res->size == 0 || pvda_gpu_owns(res->ptr)) return 0;
+	*tmp        = pvda_gpu_alloc(res->size * res->nn);
+	dev->ptr    = *tmp;
+	dev->stride = (int64_t)res->nn;
+	return *tmp ? 0 : -1;
+}
+
+// GPU views of the operands of a coefficient-domain operation (up to two inputs and the result),
+// with the GPU buffers created for those in host memory
+typedef struct
+{
+	ZnxVec a, b, res;
+	int64_t* buffers[3];
+} GpuZnxOperands;
+
+// b may be NULL
+static int stage(GpuZnxOperands* g, const ZnxVec* res, const ZnxVec* a, const ZnxVec* b)
+{
+	memset(g, 0, sizeof(*g));
+	if (a && znx_on_gpu(&g->a, &g->buffers[0], a)) return -1;
+	if (b && znx_on_gpu(&g->b, &g->buffers[1], b)) return -1;
+	return znx_result_on_gpu(&g->res, &g->buffers[2], res);
+}
+
+// Downloads the result into res when it was computed in a GPU buffer (if ok), and releases the
+// buffers of stage
+static int unstage(GpuZnxOperands* g, const ZnxVec* res, int ok)
+{
+	int status = ok ? 0 : -1;
+	if (ok && g->buffers[2]) status = znx_download(res, g->buffers[2]);
+	for (int i = 0; i < 3; ++i) pvda_gpu_free(g->buffers[i]);
+	return status;
+}
+
 // --- Allocations: the backend objects are GPU buffers ---
 
 static BE_PolyVecDFT* cuda_new_vec_znx_dft(const PvdaBackend* backend, uint64_t size)
@@ -181,18 +220,10 @@ static int cuda_vec_znx_idft(const PvdaBackend* backend, ZnxVec* res, const BE_P
 	DISPATCH_OBJECTS("pvda_vec_znx_idft", WHERE(a_dft), WHERE(res->ptr, a_dft),
 	                 backend->host_vt.pvda_vec_znx_idft(backend, res, a_dft, a_size));
 	GPU_RUN();
-	if (pvda_gpu_owns(res->ptr))
-	{
-		gpu_vt_vec_znx_idft(res->ptr, res->size, res->stride, (const int64_t*)a_dft, a_size, res->nn);
-		GPU_DONE();
-	}
-	// A host result is computed contiguously on the GPU, then downloaded
-	int64_t* res_dev = pvda_gpu_alloc((res->size ? res->size : 1) * res->nn);
-	if (!res_dev) return -1;
-	gpu_vt_vec_znx_idft(res_dev, res->size, (int64_t)res->nn, (const int64_t*)a_dft, a_size, res->nn);
-	int status = znx_download(res, res_dev);
-	pvda_gpu_free(res_dev);
-	if (status) return -1;
+	GpuZnxOperands g;
+	if (stage(&g, res, NULL, NULL)) return unstage(&g, res, 0);
+	gpu_vt_vec_znx_idft(g.res.ptr, g.res.size, g.res.stride, (const int64_t*)a_dft, a_size, res->nn);
+	if (unstage(&g, res, 1)) return -1;
 	GPU_DONE();
 }
 
@@ -335,16 +366,17 @@ static int cuda_vmp_prepare_vec(const PvdaBackend* backend, BE_PolyVecVmpPrep* p
 	GPU_DONE();
 }
 
-// --- Coefficient domain: on the spqlios backend for host vectors (the library's) ---
+// --- Coefficient domain: on the GPU, host vectors being uploaded and a host result downloaded ---
 
 static int cuda_vec_znx_normalize_base2k(const PvdaBackend* backend, uint64_t log2_base2k, ZnxVec* res,
                                          const ZnxVec* a)
 {
-	DISPATCH("pvda_vec_znx_normalize_base2k", WHERE(res->ptr, a->ptr),
-	         backend->host_vt.pvda_vec_znx_normalize_base2k(backend, log2_base2k, res, a));
 	GPU_RUN();
-	gpu_normalize_base2k_sized_device(a->ptr, a->size, a->stride, res->ptr, res->size, res->stride, a->nn,
+	GpuZnxOperands g;
+	if (stage(&g, res, a, NULL)) return unstage(&g, res, 0);
+	gpu_normalize_base2k_sized_device(g.a.ptr, g.a.size, g.a.stride, g.res.ptr, g.res.size, g.res.stride, a->nn,
 	                                  (uint32_t)log2_base2k);
+	if (unstage(&g, res, 1)) return -1;
 	GPU_DONE();
 }
 
@@ -357,55 +389,67 @@ static int cuda_znx_small_product(const PvdaBackend* backend, int64_t* res, cons
 
 static int cuda_vec_znx_negate(const PvdaBackend* backend, ZnxVec* res, const ZnxVec* a)
 {
-	DISPATCH("pvda_vec_znx_negate", WHERE(res->ptr, a->ptr), backend->host_vt.pvda_vec_znx_negate(backend, res, a));
 	GPU_RUN();
-	gpu_vt_vec_znx_negate(res->ptr, res->size, res->stride, a->ptr, a->size, a->stride, res->nn);
+	GpuZnxOperands g;
+	if (stage(&g, res, a, NULL)) return unstage(&g, res, 0);
+	gpu_vt_vec_znx_negate(g.res.ptr, g.res.size, g.res.stride, g.a.ptr, g.a.size, g.a.stride, res->nn);
+	if (unstage(&g, res, 1)) return -1;
 	GPU_DONE();
 }
 
 static int cuda_vec_znx_add(const PvdaBackend* backend, ZnxVec* res, const ZnxVec* a, const ZnxVec* b)
 {
-	DISPATCH("pvda_vec_znx_add", WHERE(res->ptr, a->ptr, b->ptr),
-	         backend->host_vt.pvda_vec_znx_add(backend, res, a, b));
 	GPU_RUN();
-	gpu_vt_vec_znx_add(res->ptr, res->size, res->stride, a->ptr, a->size, a->stride, b->ptr, b->size, b->stride,
-	                   res->nn);
+	GpuZnxOperands g;
+	if (stage(&g, res, a, b)) return unstage(&g, res, 0);
+	gpu_vt_vec_znx_add(g.res.ptr, g.res.size, g.res.stride, g.a.ptr, g.a.size, g.a.stride, g.b.ptr, g.b.size,
+	                   g.b.stride, res->nn);
+	if (unstage(&g, res, 1)) return -1;
 	GPU_DONE();
 }
 
 static int cuda_vec_znx_sub(const PvdaBackend* backend, ZnxVec* res, const ZnxVec* a, const ZnxVec* b)
 {
-	DISPATCH("pvda_vec_znx_sub", WHERE(res->ptr, a->ptr, b->ptr),
-	         backend->host_vt.pvda_vec_znx_sub(backend, res, a, b));
 	GPU_RUN();
-	gpu_vt_vec_znx_sub(res->ptr, res->size, res->stride, a->ptr, a->size, a->stride, b->ptr, b->size, b->stride,
-	                   res->nn);
-	GPU_DONE();
-}
-
-static int cuda_znx_automorphism(const PvdaBackend* backend, const int64_t p, int64_t* res, const int64_t* a)
-{
-	DISPATCH("pvda_znx_automorphism", WHERE(res, a), backend->host_vt.pvda_znx_automorphism(backend, p, res, a));
-	GPU_RUN();
-	uint64_t nn = nn_of(backend);
-	gpu_vec_znx_automorphism_device(p, a, res, nn, 1, (int64_t)nn, 1, (int64_t)nn);
+	GpuZnxOperands g;
+	if (stage(&g, res, a, b)) return unstage(&g, res, 0);
+	gpu_vt_vec_znx_sub(g.res.ptr, g.res.size, g.res.stride, g.a.ptr, g.a.size, g.a.stride, g.b.ptr, g.b.size,
+	                   g.b.stride, res->nn);
+	if (unstage(&g, res, 1)) return -1;
 	GPU_DONE();
 }
 
 static int cuda_vec_znx_automorphism(const PvdaBackend* backend, const int64_t p, ZnxVec* res, const ZnxVec* a)
 {
-	DISPATCH("pvda_vec_znx_automorphism", WHERE(res->ptr, a->ptr),
-	         backend->host_vt.pvda_vec_znx_automorphism(backend, p, res, a));
 	GPU_RUN();
-	gpu_vec_znx_automorphism_device(p, a->ptr, res->ptr, res->nn, res->size, res->stride, a->size, a->stride);
+	GpuZnxOperands g;
+	if (stage(&g, res, a, NULL)) return unstage(&g, res, 0);
+	// A result in a buffer of stage never aliases a, so the scratch-free variant is safe then
+	if (g.buffers[2])
+		gpu_vec_znx_automorphism_device_noalias(p, g.a.ptr, g.res.ptr, res->nn, g.res.size, g.res.stride, g.a.size,
+		                                        g.a.stride);
+	else
+		gpu_vec_znx_automorphism_device(p, g.a.ptr, g.res.ptr, res->nn, g.res.size, g.res.stride, g.a.size,
+		                                g.a.stride);
+	if (unstage(&g, res, 1)) return -1;
 	GPU_DONE();
+}
+
+static int cuda_znx_automorphism(const PvdaBackend* backend, const int64_t p, int64_t* res, const int64_t* a)
+{
+	uint64_t nn  = nn_of(backend);
+	ZnxVec res_v = znx_vec_view(nn, 1, (int64_t)nn, res);
+	ZnxVec a_v   = znx_vec_view(nn, 1, (int64_t)nn, (int64_t*)a);
+	return cuda_vec_znx_automorphism(backend, p, &res_v, &a_v);
 }
 
 static int cuda_vec_znx_rotate(const PvdaBackend* backend, const int64_t p, ZnxVec* res, const ZnxVec* a)
 {
-	DISPATCH("pvda_vec_znx_rotate", WHERE(res->ptr, a->ptr), backend->host_vt.pvda_vec_znx_rotate(backend, p, res, a));
 	GPU_RUN();
-	gpu_vec_znx_rotate_device(p, a->ptr, res->ptr, res->nn, res->size, res->stride, a->size, a->stride);
+	GpuZnxOperands g;
+	if (stage(&g, res, a, NULL)) return unstage(&g, res, 0);
+	gpu_vec_znx_rotate_device(p, g.a.ptr, g.res.ptr, res->nn, g.res.size, g.res.stride, g.a.size, g.a.stride);
+	if (unstage(&g, res, 1)) return -1;
 	GPU_DONE();
 }
 
