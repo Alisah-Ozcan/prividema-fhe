@@ -1,0 +1,108 @@
+#ifndef PVDA_GPU_STREAM_H
+#define PVDA_GPU_STREAM_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Opaque CUDA stream handle (cudaStream_t), exposed as void* so this header
+// can be included from plain C translation units that never see
+// <cuda_runtime.h>. NULL always denotes the default stream.
+
+// Create a new, non-default CUDA stream. Caller owns it: release with
+// pvda_gpu_stream_destroy once no longer selected as the active stream.
+void* pvda_gpu_stream_create(void);
+
+// Destroy a stream created by pvda_gpu_stream_create.
+void pvda_gpu_stream_destroy(void* stream);
+
+// Block the calling host thread until all work already queued on `stream`
+// completes. Pass NULL to synchronize the default stream.
+void pvda_gpu_stream_synchronize(void* stream);
+
+// Push `stream` as the thread-local active stream used by every GPU backend
+// kernel launch / memcpy issued from this host thread from this point on.
+// Pass NULL to explicitly select the default stream. Every push must be
+// paired with a pvda_gpu_stream_pop to restore the previous active stream —
+// pushes nest, so this composes across call sites.
+void pvda_gpu_stream_push(void* stream);
+
+// Restore the active stream to what it was before the matching push.
+void pvda_gpu_stream_pop(void);
+
+// Returns this thread's current active stream (NULL means default stream).
+void* pvda_gpu_stream_get_active(void);
+
+// Waits until all the GPU work queued so far, on every stream, has completed. GPU operations
+// are asynchronous: use this e.g. before reading a wall-clock timer around them.
+void pvda_gpu_device_synchronize(void);
+
+// GPU buffers are served from a stream-ordered memory pool that keeps freed
+// memory cached for reuse (bounded by the PVDA_GPU_POOL_CACHE_MB environment
+// variable, unbounded by default). Synchronizes the device and returns all
+// cached, currently unused memory to the driver.
+void pvda_gpu_release_cached_memory(void);
+
+// Returns 1 if a CUDA device can be used, 0 otherwise (never throws).
+int pvda_gpu_available(void);
+
+// ---------------------------------------------------------------------------
+// Error reporting
+//
+// A failing GPU operation (out of memory, a CUDA error, ...) never aborts the
+// program: it records the failure here and returns NULL or 0. Operations of
+// the CUDA backend turn a recorded failure into their usual -1 return, so the
+// library's error handling is the same on both backends.
+// ---------------------------------------------------------------------------
+
+// Records a GPU failure (used by the GPU implementations).
+void pvda_gpu_record_error(const char* message);
+
+// Returns 1 if a GPU operation failed since the last call, and clears the flag.
+int pvda_gpu_take_error(void);
+
+// The message of the last recorded failure, "" if there is none. Valid until the next failure.
+const char* pvda_gpu_last_error(void);
+
+// Returns 1 if ptr points into GPU memory allocated by the library (pvda_gpu_alloc and the GPU
+// objects), 0 otherwise. Does not use the CUDA runtime, so it is cheap and never initializes CUDA.
+int pvda_gpu_owns(const void* ptr);
+
+// Copies bytes between any two of host and GPU memory, on the active stream. Returns once
+// the data is readable when dst is host memory.
+void pvda_gpu_memcpy(void* dst, const void* src, size_t bytes);
+
+// Zeroes bytes of GPU memory, on the active stream.
+void pvda_gpu_memzero(void* ptr, size_t bytes);
+
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef __CUDACC__
+
+#include <cuda_runtime.h>
+
+// The stream every GPU backend kernel launch / memcpy uses, for this host
+// thread. Defaults to the default stream (0). Prefer GpuStreamGuard (C++) or
+// pvda_gpu_stream_push/pop (C) over assigning this directly, so nested scopes
+// compose and always restore the previous stream.
+extern thread_local cudaStream_t gpu_active_stream;
+
+// RAII scope guard: activates `stream` as gpu_active_stream for this thread
+// and restores the previous value on scope exit. Safe to nest.
+class GpuStreamGuard {
+   public:
+	explicit GpuStreamGuard(cudaStream_t stream) : previous_(gpu_active_stream) { gpu_active_stream = stream; }
+	~GpuStreamGuard() { gpu_active_stream = previous_; }
+
+	GpuStreamGuard(const GpuStreamGuard&)            = delete;
+	GpuStreamGuard& operator=(const GpuStreamGuard&) = delete;
+
+   private:
+	cudaStream_t previous_;
+};
+
+#endif  // __CUDACC__
+
+#endif  // PVDA_GPU_STREAM_H

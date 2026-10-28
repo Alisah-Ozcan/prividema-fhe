@@ -13,6 +13,13 @@
 #include "impls/rng_openssl.h"
 #endif
 
+#ifdef ENABLE_CUDA
+#include "gpu/common/gpu_nttparameters.h"
+#include "gpu/common/gpu_stream.h"
+#include "impls/cuda_alias.h"
+#include "logger.h"
+#endif
+
 PvdaBackend* pvda_new_spqlios_backend(int nn)
 {
 	PvdaBackend* res    = malloc(sizeof(PvdaBackend));
@@ -25,7 +32,36 @@ PvdaBackend* pvda_new_spqlios_backend(int nn)
 #endif
 	res->pvda_fft_data = new_fft_data(nn);
 	pvda_fill_cpu_nt(&res->vt);
+	res->host_vt = res->vt;
 	return res;
+}
+
+#ifdef ENABLE_CUDA
+PvdaBackend* pvda_new_cuda_backend(int nn)
+{
+	if (!pvda_gpu_available())
+	{
+		log_message(LOG_ERROR, "pvda_new_cuda_backend: no CUDA device available");
+		return NULL;
+	}
+	// The CUDA backend embeds a spqlios backend for the host-side operations
+	// that have no GPU implementation (encryption, key generation, ...)
+	PvdaBackend* res = pvda_new_spqlios_backend(nn);
+	if (!res) return NULL;
+	// host_vt keeps the spqlios table (set by pvda_new_spqlios_backend) for host operands
+	pvda_fill_cuda(&res->vt);
+	gpu_ntt_initialize((size_t)nn);
+	return res;
+}
+#endif
+
+PvdaBackend* pvda_new_backend(PvdaBackendConfig config)
+{
+#ifdef ENABLE_CUDA
+	return pvda_new_cuda_backend((int)config.nn);
+#else
+	return pvda_new_spqlios_backend((int)config.nn);
+#endif
 }
 
 void pvda_delete_backend(PvdaBackend* module)

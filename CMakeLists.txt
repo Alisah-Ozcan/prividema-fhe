@@ -43,6 +43,7 @@ option(BUILD_NATIVE "Enable march=native optimisations" OFF)
 option(ENABLE_DEBUG "Enable additional prints for debugging purpose" OFF)
 option(BUILD_DOCS "Build the documentation using Doxygen" OFF)
 option(OPENSSL_BACKEND "Allow using OpenSSL for some backend mathematics (for now RNG)" OFF)
+option(ENABLE_CUDA "Enable the CUDA GPU backend (pvda_new_backend then creates a CUDA backend)" OFF)
 
 # ----------------------------------------
 # Debug print configuration
@@ -80,10 +81,48 @@ if(BUILD_NATIVE)
 
 endif()
 
+# ----------------------------------------
+# CUDA configuration
+# ----------------------------------------
+if(ENABLE_CUDA)
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  message(STATUS "CUDA enabled — toolkit version: ${CUDAToolkit_VERSION}")
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    # Cover Maxwell (52) through Hopper (90); override with -DCMAKE_CUDA_ARCHITECTURES=<sm>
+    set(CMAKE_CUDA_ARCHITECTURES 52 60 70 75 80 86 89 90)
+  endif()
+
+  # ----------------------------------------
+  # GPU-NTT (third-party, CUDA NTT library)
+  # ----------------------------------------
+  set(GPUNTT_BUILD_EXAMPLES  OFF CACHE BOOL "" FORCE)
+  set(GPUNTT_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+
+  # GPU-NTT's CMakeLists uses ${GPUNTT_SOURCE_DIR} internally (not set by FetchContent).
+  # FetchContent places sources at ${FETCHCONTENT_BASE_DIR}/gpuntt-src — pre-set the var.
+  if(NOT FETCHCONTENT_BASE_DIR)
+    set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps" CACHE PATH "" FORCE)
+  endif()
+  set(GPUNTT_SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/gpuntt-src" CACHE INTERNAL "")
+
+  FetchContent_Declare(
+    gpuntt
+    GIT_REPOSITORY https://github.com/Alisah-Ozcan/GPU-NTT.git
+    GIT_TAG        main
+    GIT_SHALLOW    TRUE
+  )
+  FetchContent_MakeAvailable(gpuntt)
+  message(STATUS "GPU-NTT fetched — target: GPUNTT::ntt")
+endif()
+
 include(CheckIPOSupported)
 check_ipo_supported(RESULT lto_supported OUTPUT lto_error)
 
-if(lto_supported)
+# Disabled when ENABLE_CUDA=ON: CUDA fat-binary symbols conflict with GCC LTO.
+if(ENABLE_CUDA)
+  message(STATUS "LTO disabled — incompatible with CUDA fat-binary linking")
+elseif(lto_supported)
   message(STATUS "LTO/IPO enabled for optimized builds")
   # This sets the global default for all targets defined after this point
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)

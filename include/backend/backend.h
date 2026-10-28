@@ -31,9 +31,10 @@ typedef struct pvda_module_config_t
 PvdaBackend* pvda_new_spqlios_backend(int nn);
 
 /**
- * NOT YET IMPLEMENTED
  * @brief Create a new backend according to the configuration struct
  *
+ * The backend is the one selected at compile time: a CUDA backend when the library is built
+ * with ENABLE_CUDA=ON, a spqlios backend otherwise.
  *
  * @param config A backend configuration struct
  *

@@ -1,0 +1,444 @@
+#include "impls/cuda_alias.h"
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "backend_types.h"
+#include "gpu/common/gpu_stream.h"
+#include "gpu/host/gpu_memory_host.h"
+#include "gpu/host/normalize_host.h"
+#include "gpu/host/vec_znx_rotate_automorphism_host.h"
+#include "gpu/host/vtable_ops_host.h"
+#include "logger.h"
+
+// Where the operands of a table operation live, see pvda_residency
+#define WHERE(...) PVDA_RESIDENCY(__VA_ARGS__)
+
+#define REJECT_MIXED(op)                                                 \
+	do                                                                   \
+	{                                                                    \
+		log_message(LOG_ERROR, op ": operands mix host and GPU memory"); \
+		return -1;                                                       \
+	} while (0)
+
+#define DISPATCH(op, residency, host_call) \
+	switch (residency)                     \
+	{                                      \
+		case PVDA_ON_HOST:                 \
+			return host_call;              \
+		case PVDA_MIXED_RESIDENCY:         \
+			REJECT_MIXED(op);              \
+		default:                           \
+			break;                         \
+	}
+
+// For an operation on backend objects and coefficient vectors: on the spqlios backend when
+// everything is in host memory, on the GPU when the objects are in GPU memory (the coefficient
+// vectors in host memory being uploaded for it, see znx_on_gpu), rejected otherwise
+#define DISPATCH_OBJECTS(op, objects, all, host_call)      \
+	do                                                     \
+	{                                                      \
+		if ((all) == PVDA_ON_HOST) return host_call;       \
+		if ((objects) != PVDA_ON_DEVICE) REJECT_MIXED(op); \
+	} while (0)
+
+// A GPU operation records its failures (gpu_stream.h) instead of aborting: clear any stale
+// one before running, and report a new one as this operation's -1
+#define GPU_RUN()  pvda_gpu_take_error()
+#define GPU_DONE() return pvda_gpu_take_error() ? -1 : 0
+
+static uint64_t nn_of(const PvdaBackend* backend) { return backend->host_vt.pvda_module_extract_nn(backend); }
+
+// --- Coefficient vectors in host memory (ZnxVec) used by GPU operations ---
+
+// Number of elements from the first coefficient of a to the last one
+static size_t znx_span(const ZnxVec* a) { return a->size == 0 ? 0 : (size_t)((a->size - 1) * a->stride) + a->nn; }
+
+// *dev = a when a is in GPU memory, else a view of a copy of a uploaded to *upload (to release
+// with pvda_gpu_free)
+static int znx_on_gpu(ZnxVec* dev, int64_t** upload, const ZnxVec* a)
+{
+	*dev    = *a;
+	*upload = NULL;
+	if (a->size == 0 || pvda_gpu_owns(a->ptr)) return 0;
+	*upload  = pvda_gpu_upload(a->ptr, znx_span(a));
+	dev->ptr = *upload;
+	return *upload ? 0 : -1;
+}
+
+// Downloads the res->size contiguous limbs of src (GPU memory) into res (host memory, strided)
+static int znx_download(const ZnxVec* res, const int64_t* src)
+{
+	size_t n = res->nn;
+	if (res->size == 0) return 0;
+	if (res->stride == (int64_t)n)
+	{
+		pvda_gpu_download(res->ptr, src, res->size * n);
+		return 0;
+	}
+	int64_t* tmp = malloc(res->size * n * sizeof(int64_t));
+	if (!tmp) return -1;
+	pvda_gpu_download(tmp, src, res->size * n);
+	for (uint64_t i = 0; i < res->size; ++i) memcpy(res->ptr + i * res->stride, tmp + i * n, n * sizeof(int64_t));
+	free(tmp);
+	return 0;
+}
+
+// --- Allocations: the backend objects are GPU buffers ---
+
+static BE_PolyVecDFT* cuda_new_vec_znx_dft(const PvdaBackend* backend, uint64_t size)
+{
+	return (BE_PolyVecDFT*)pvda_gpu_alloc((size ? size : 1) * nn_of(backend));
+}
+
+static void cuda_delete_vec_znx_dft(const PvdaBackend* backend, BE_PolyVecDFT* res)
+{
+	if (!res) return;
+	if (pvda_is_device_pointer(res))
+		pvda_gpu_free((int64_t*)res);
+	else
+		backend->host_vt.pvda_delete_vec_znx_dft(backend, res);
+}
+
+static int64_t* cuda_new_vec_znx_big(const PvdaBackend* backend, int64_t size)
+{
+	return backend->host_vt.pvda_new_vec_znx_big(backend, size);
+}
+
+static void cuda_delete_vec_znx_big(const PvdaBackend* backend, int64_t* res)
+{
+	if (!res) return;
+	if (pvda_is_device_pointer(res))
+		pvda_gpu_free(res);
+	else
+		backend->host_vt.pvda_delete_vec_znx_big(backend, res);
+}
+
+static BE_PolySvpPrep* cuda_new_svp_ppol(const PvdaBackend* backend)
+{
+	return (BE_PolySvpPrep*)pvda_gpu_alloc(nn_of(backend));
+}
+
+static void cuda_delete_svp_ppol(const PvdaBackend* backend, BE_PolySvpPrep* res)
+{
+	if (!res) return;
+	if (pvda_is_device_pointer(res))
+		pvda_gpu_free((int64_t*)res);
+	else
+		backend->host_vt.pvda_delete_svp_ppol(backend, res);
+}
+
+// Zeroed, like the spqlios one
+static BE_PolyVecVmpPrep* cuda_new_vmp_pvec(const PvdaBackend* backend, uint64_t nrows)
+{
+	size_t n_elements = (nrows ? nrows : 1) * nn_of(backend);
+	int64_t* res      = pvda_gpu_alloc(n_elements);
+	if (res) pvda_gpu_zero(res, n_elements);
+	return (BE_PolyVecVmpPrep*)res;
+}
+
+static void cuda_delete_vmp_pvec(const PvdaBackend* backend, BE_PolyVecVmpPrep* pvec)
+{
+	if (!pvec) return;
+	if (pvda_is_device_pointer(pvec))
+		pvda_gpu_free((int64_t*)pvec);
+	else
+		backend->host_vt.pvda_delete_vmp_pvec(backend, pvec);
+}
+
+static BE_PolyMatVmpPrep* cuda_new_vmp_pmat(const PvdaBackend* backend, uint64_t nrows, uint64_t ncols)
+{
+	return (BE_PolyMatVmpPrep*)pvda_gpu_alloc((nrows * ncols ? nrows * ncols : 1) * nn_of(backend));
+}
+
+static void cuda_delete_vmp_pmat(const PvdaBackend* backend, BE_PolyMatVmpPrep* pmat)
+{
+	if (!pmat) return;
+	if (pvda_is_device_pointer(pmat))
+		pvda_gpu_free((int64_t*)pmat);
+	else
+		backend->host_vt.pvda_delete_vmp_pmat(backend, pmat);
+}
+
+// --- DFT (NTT) domain ---
+
+static int cuda_vec_znx_dft(const PvdaBackend* backend, BE_PolyVecDFT* res, uint64_t res_size, const ZnxVec* a)
+{
+	DISPATCH_OBJECTS("pvda_vec_znx_dft", WHERE(res), WHERE(res, a->ptr),
+	                 backend->host_vt.pvda_vec_znx_dft(backend, res, res_size, a));
+	GPU_RUN();
+	ZnxVec a_dev;
+	int64_t* a_upload;
+	if (znx_on_gpu(&a_dev, &a_upload, a)) return -1;
+	gpu_vt_vec_znx_dft((int64_t*)res, res_size, a_dev.ptr, a_dev.size, a_dev.stride, a_dev.nn);
+	pvda_gpu_free(a_upload);
+	GPU_DONE();
+}
+
+static int cuda_vec_znx_idft(const PvdaBackend* backend, ZnxVec* res, const BE_PolyVecDFT* a_dft, uint64_t a_size)
+{
+	DISPATCH_OBJECTS("pvda_vec_znx_idft", WHERE(a_dft), WHERE(res->ptr, a_dft),
+	                 backend->host_vt.pvda_vec_znx_idft(backend, res, a_dft, a_size));
+	GPU_RUN();
+	if (pvda_gpu_owns(res->ptr))
+	{
+		gpu_vt_vec_znx_idft(res->ptr, res->size, res->stride, (const int64_t*)a_dft, a_size, res->nn);
+		GPU_DONE();
+	}
+	// A host result is computed contiguously on the GPU, then downloaded
+	int64_t* res_dev = pvda_gpu_alloc((res->size ? res->size : 1) * res->nn);
+	if (!res_dev) return -1;
+	gpu_vt_vec_znx_idft(res_dev, res->size, (int64_t)res->nn, (const int64_t*)a_dft, a_size, res->nn);
+	int status = znx_download(res, res_dev);
+	pvda_gpu_free(res_dev);
+	if (status) return -1;
+	GPU_DONE();
+}
+
+static int cuda_vec_znx_dft_add(const PvdaBackend* backend, BE_PolyVecDFT* res, uint64_t res_n_limbs,
+                                BE_PolyVecDFT* a, uint64_t a_n_limbs, BE_PolyVecDFT* b, uint64_t b_n_limbs)
+{
+	DISPATCH("pvda_vec_znx_dft_add", WHERE(res, a, b),
+	         backend->host_vt.pvda_vec_znx_dft_add(backend, res, res_n_limbs, a, a_n_limbs, b, b_n_limbs));
+	GPU_RUN();
+	gpu_vt_vec_znx_dft_add((int64_t*)res, res_n_limbs, (const int64_t*)a, a_n_limbs, (const int64_t*)b, b_n_limbs,
+	                       nn_of(backend));
+	GPU_DONE();
+}
+
+static int cuda_svp_prepare(const PvdaBackend* backend, BE_PolySvpPrep* prepared_pol, const int64_t* pol)
+{
+	DISPATCH_OBJECTS("pvda_svp_prepare", WHERE(prepared_pol), WHERE(prepared_pol, pol),
+	                 backend->host_vt.pvda_svp_prepare(backend, prepared_pol, pol));
+	GPU_RUN();
+	uint64_t nn       = nn_of(backend);
+	ZnxVec pol_vec    = znx_vec_view(nn, 1, (int64_t)nn, (int64_t*)pol);
+	ZnxVec pol_dev;
+	int64_t* pol_upload;
+	if (znx_on_gpu(&pol_dev, &pol_upload, &pol_vec)) return -1;
+	gpu_vt_svp_prepare((int64_t*)prepared_pol, pol_dev.ptr, nn);
+	pvda_gpu_free(pol_upload);
+	GPU_DONE();
+}
+
+static int cuda_svp_apply_dft(const PvdaBackend* backend, const BE_PolyVecDFT* res, uint64_t res_size,
+                              const BE_PolySvpPrep* prepared_pol, const ZnxVec* a)
+{
+	DISPATCH_OBJECTS("pvda_svp_apply_dft", WHERE(res, prepared_pol), WHERE(res, prepared_pol, a->ptr),
+	                 backend->host_vt.pvda_svp_apply_dft(backend, res, res_size, prepared_pol, a));
+	GPU_RUN();
+	ZnxVec a_dev;
+	int64_t* a_upload;
+	if (znx_on_gpu(&a_dev, &a_upload, a)) return -1;
+	uint64_t rows  = a->size < res_size ? a->size : res_size;
+	int64_t* a_ntt = pvda_gpu_alloc((rows ? rows : 1) * a->nn);
+	if (!a_ntt)
+	{
+		pvda_gpu_free(a_upload);
+		return -1;
+	}
+	gpu_vt_vec_znx_dft(a_ntt, rows, a_dev.ptr, a_dev.size, a_dev.stride, a_dev.nn);
+	gpu_vt_svp_apply_ntt((int64_t*)res, res_size, (const int64_t*)prepared_pol, a_ntt, rows, a->nn);
+	pvda_gpu_free(a_ntt);
+	pvda_gpu_free(a_upload);
+	GPU_DONE();
+}
+
+static int cuda_svp_apply_dft_to_dft(const PvdaBackend* backend, const BE_PolyVecDFT* res, uint64_t res_size,
+                                     const BE_PolySvpPrep* ppol, const BE_PolyVecDFT* a, uint64_t a_size)
+{
+	DISPATCH("pvda_svp_apply_dft_to_dft", WHERE(res, ppol, a),
+	         backend->host_vt.pvda_svp_apply_dft_to_dft(backend, res, res_size, ppol, a, a_size));
+	GPU_RUN();
+	gpu_vt_svp_apply_ntt((int64_t*)res, res_size, (const int64_t*)ppol, (const int64_t*)a, a_size, nn_of(backend));
+	GPU_DONE();
+}
+
+// --- Vector-matrix products ---
+
+static int cuda_vmp_prepare_contiguous(const PvdaBackend* backend, BE_PolyMatVmpPrep* pmat, const int64_t* mat,
+                                       uint64_t nrows, uint64_t ncols)
+{
+	DISPATCH_OBJECTS("pvda_vmp_prepare_contiguous", WHERE(pmat), WHERE(pmat, mat),
+	                 backend->host_vt.pvda_vmp_prepare_contiguous(backend, pmat, mat, nrows, ncols));
+	GPU_RUN();
+	uint64_t nn    = nn_of(backend);
+	ZnxVec mat_vec = znx_vec_view(nn, nrows * ncols, (int64_t)nn, (int64_t*)mat);
+	ZnxVec mat_dev;
+	int64_t* mat_upload;
+	if (znx_on_gpu(&mat_dev, &mat_upload, &mat_vec)) return -1;
+	gpu_vt_vmp_prepare((int64_t*)pmat, mat_dev.ptr, nrows, ncols, nn);
+	pvda_gpu_free(mat_upload);
+	GPU_DONE();
+}
+
+static int cuda_vmp_apply_dft(const PvdaBackend* backend, BE_PolyVecDFT* res, uint64_t res_size, const ZnxVec* a,
+                              const BE_PolyMatVmpPrep* pmat, uint64_t nrows, uint64_t ncols)
+{
+	DISPATCH_OBJECTS("pvda_vmp_apply_dft", WHERE(res, pmat), WHERE(res, a->ptr, pmat),
+	                 backend->host_vt.pvda_vmp_apply_dft(backend, res, res_size, a, pmat, nrows, ncols));
+	GPU_RUN();
+	ZnxVec a_dev;
+	int64_t* a_upload;
+	if (znx_on_gpu(&a_dev, &a_upload, a)) return -1;
+	uint64_t rows  = a->size < nrows ? a->size : nrows;
+	int64_t* a_ntt = pvda_gpu_alloc((rows ? rows : 1) * a->nn);
+	if (!a_ntt)
+	{
+		pvda_gpu_free(a_upload);
+		return -1;
+	}
+	gpu_vt_vec_znx_dft(a_ntt, rows, a_dev.ptr, a_dev.size, a_dev.stride, a_dev.nn);
+	gpu_vt_vmp_apply_ntt((int64_t*)res, res_size, a_ntt, rows, (const int64_t*)pmat, nrows, ncols, a->nn);
+	pvda_gpu_free(a_ntt);
+	pvda_gpu_free(a_upload);
+	GPU_DONE();
+}
+
+static int cuda_vmp_apply_dft_to_dft(const PvdaBackend* backend, BE_PolyVecDFT* res, const uint64_t res_size,
+                                     const BE_PolyVecDFT* a_dft, uint64_t a_size, const BE_PolyMatVmpPrep* pmat,
+                                     const uint64_t nrows, const uint64_t ncols)
+{
+	DISPATCH("pvda_vmp_apply_dft_to_dft", WHERE(res, a_dft, pmat),
+	         backend->host_vt.pvda_vmp_apply_dft_to_dft(backend, res, res_size, a_dft, a_size, pmat, nrows, ncols));
+	GPU_RUN();
+	gpu_vt_vmp_apply_ntt((int64_t*)res, res_size, (const int64_t*)a_dft, a_size, (const int64_t*)pmat, nrows, ncols,
+	                     nn_of(backend));
+	GPU_DONE();
+}
+
+// On the GPU a prepared vector (pvda_vmp_prepare_vec) is the NTT of the vector
+static int cuda_vmp_apply_prepared_to_dft(const PvdaBackend* backend, BE_PolyVecDFT* res, const uint64_t res_size,
+                                          const BE_PolyVecVmpPrep* a_prep, uint64_t a_size,
+                                          const BE_PolyMatVmpPrep* pmat, const uint64_t nrows, const uint64_t ncols)
+{
+	DISPATCH(
+	    "pvda_vmp_apply_prepared_to_dft", WHERE(res, a_prep, pmat),
+	    backend->host_vt.pvda_vmp_apply_prepared_to_dft(backend, res, res_size, a_prep, a_size, pmat, nrows, ncols));
+	GPU_RUN();
+	gpu_vt_vmp_apply_ntt((int64_t*)res, res_size, (const int64_t*)a_prep, a_size, (const int64_t*)pmat, nrows, ncols,
+	                     nn_of(backend));
+	GPU_DONE();
+}
+
+static int cuda_vmp_prepare_vec(const PvdaBackend* backend, BE_PolyVecVmpPrep* pvec, uint64_t nrows, const ZnxVec* a)
+{
+	DISPATCH_OBJECTS("pvda_vmp_prepare_vec", WHERE(pvec), WHERE(pvec, a->ptr),
+	                 backend->host_vt.pvda_vmp_prepare_vec(backend, pvec, nrows, a));
+	GPU_RUN();
+	ZnxVec a_dev;
+	int64_t* a_upload;
+	if (znx_on_gpu(&a_dev, &a_upload, a)) return -1;
+	gpu_vt_vec_znx_dft((int64_t*)pvec, nrows, a_dev.ptr, a_dev.size, a_dev.stride, a_dev.nn);
+	pvda_gpu_free(a_upload);
+	GPU_DONE();
+}
+
+// --- Coefficient domain: on the spqlios backend for host vectors (the library's) ---
+
+static int cuda_vec_znx_normalize_base2k(const PvdaBackend* backend, uint64_t log2_base2k, ZnxVec* res,
+                                         const ZnxVec* a)
+{
+	DISPATCH("pvda_vec_znx_normalize_base2k", WHERE(res->ptr, a->ptr),
+	         backend->host_vt.pvda_vec_znx_normalize_base2k(backend, log2_base2k, res, a));
+	GPU_RUN();
+	gpu_normalize_base2k_sized_device(a->ptr, a->size, a->stride, res->ptr, res->size, res->stride, a->nn,
+	                                  (uint32_t)log2_base2k);
+	GPU_DONE();
+}
+
+static int cuda_znx_small_product(const PvdaBackend* backend, int64_t* res, const int64_t* a, const int64_t* b)
+{
+	DISPATCH("pvda_znx_small_product", WHERE(res, a, b), backend->host_vt.pvda_znx_small_product(backend, res, a, b));
+	log_message(LOG_ERROR, "pvda_znx_small_product has no GPU implementation");
+	return -1;
+}
+
+static int cuda_vec_znx_negate(const PvdaBackend* backend, ZnxVec* res, const ZnxVec* a)
+{
+	DISPATCH("pvda_vec_znx_negate", WHERE(res->ptr, a->ptr), backend->host_vt.pvda_vec_znx_negate(backend, res, a));
+	GPU_RUN();
+	gpu_vt_vec_znx_negate(res->ptr, res->size, res->stride, a->ptr, a->size, a->stride, res->nn);
+	GPU_DONE();
+}
+
+static int cuda_vec_znx_add(const PvdaBackend* backend, ZnxVec* res, const ZnxVec* a, const ZnxVec* b)
+{
+	DISPATCH("pvda_vec_znx_add", WHERE(res->ptr, a->ptr, b->ptr),
+	         backend->host_vt.pvda_vec_znx_add(backend, res, a, b));
+	GPU_RUN();
+	gpu_vt_vec_znx_add(res->ptr, res->size, res->stride, a->ptr, a->size, a->stride, b->ptr, b->size, b->stride,
+	                   res->nn);
+	GPU_DONE();
+}
+
+static int cuda_vec_znx_sub(const PvdaBackend* backend, ZnxVec* res, const ZnxVec* a, const ZnxVec* b)
+{
+	DISPATCH("pvda_vec_znx_sub", WHERE(res->ptr, a->ptr, b->ptr),
+	         backend->host_vt.pvda_vec_znx_sub(backend, res, a, b));
+	GPU_RUN();
+	gpu_vt_vec_znx_sub(res->ptr, res->size, res->stride, a->ptr, a->size, a->stride, b->ptr, b->size, b->stride,
+	                   res->nn);
+	GPU_DONE();
+}
+
+static int cuda_znx_automorphism(const PvdaBackend* backend, const int64_t p, int64_t* res, const int64_t* a)
+{
+	DISPATCH("pvda_znx_automorphism", WHERE(res, a), backend->host_vt.pvda_znx_automorphism(backend, p, res, a));
+	GPU_RUN();
+	uint64_t nn = nn_of(backend);
+	gpu_vec_znx_automorphism_device(p, a, res, nn, 1, (int64_t)nn, 1, (int64_t)nn);
+	GPU_DONE();
+}
+
+static int cuda_vec_znx_automorphism(const PvdaBackend* backend, const int64_t p, ZnxVec* res, const ZnxVec* a)
+{
+	DISPATCH("pvda_vec_znx_automorphism", WHERE(res->ptr, a->ptr),
+	         backend->host_vt.pvda_vec_znx_automorphism(backend, p, res, a));
+	GPU_RUN();
+	gpu_vec_znx_automorphism_device(p, a->ptr, res->ptr, res->nn, res->size, res->stride, a->size, a->stride);
+	GPU_DONE();
+}
+
+static int cuda_vec_znx_rotate(const PvdaBackend* backend, const int64_t p, ZnxVec* res, const ZnxVec* a)
+{
+	DISPATCH("pvda_vec_znx_rotate", WHERE(res->ptr, a->ptr), backend->host_vt.pvda_vec_znx_rotate(backend, p, res, a));
+	GPU_RUN();
+	gpu_vec_znx_rotate_device(p, a->ptr, res->ptr, res->nn, res->size, res->stride, a->size, a->stride);
+	GPU_DONE();
+}
+
+void pvda_fill_cuda(struct pvda_virtual_table* vt)
+{
+	vt->pvda_new_vec_znx_dft           = cuda_new_vec_znx_dft;
+	vt->pvda_vec_znx_dft               = cuda_vec_znx_dft;
+	vt->pvda_delete_vec_znx_dft        = cuda_delete_vec_znx_dft;
+	vt->pvda_new_vec_znx_big           = cuda_new_vec_znx_big;
+	vt->pvda_vec_znx_idft              = cuda_vec_znx_idft;
+	vt->pvda_delete_vec_znx_big        = cuda_delete_vec_znx_big;
+	vt->pvda_vec_znx_dft_add           = cuda_vec_znx_dft_add;
+	vt->pvda_new_svp_ppol              = cuda_new_svp_ppol;
+	vt->pvda_svp_prepare               = cuda_svp_prepare;
+	vt->pvda_svp_apply_dft             = cuda_svp_apply_dft;
+	vt->pvda_svp_apply_dft_to_dft      = cuda_svp_apply_dft_to_dft;
+	vt->pvda_delete_svp_ppol           = cuda_delete_svp_ppol;
+	vt->pvda_new_vmp_pvec              = cuda_new_vmp_pvec;
+	vt->pvda_delete_vmp_pvec           = cuda_delete_vmp_pvec;
+	vt->pvda_new_vmp_pmat              = cuda_new_vmp_pmat;
+	vt->pvda_vmp_prepare_contiguous    = cuda_vmp_prepare_contiguous;
+	vt->pvda_vmp_apply_dft             = cuda_vmp_apply_dft;
+	vt->pvda_vmp_apply_dft_to_dft      = cuda_vmp_apply_dft_to_dft;
+	vt->pvda_vmp_apply_prepared_to_dft = cuda_vmp_apply_prepared_to_dft;
+	vt->pvda_delete_vmp_pmat           = cuda_delete_vmp_pmat;
+	vt->pvda_vmp_prepare_vec           = cuda_vmp_prepare_vec;
+	vt->pvda_vec_znx_normalize_base2k  = cuda_vec_znx_normalize_base2k;
+	vt->pvda_znx_small_product         = cuda_znx_small_product;
+	vt->pvda_vec_znx_negate            = cuda_vec_znx_negate;
+	vt->pvda_vec_znx_add               = cuda_vec_znx_add;
+	vt->pvda_vec_znx_sub               = cuda_vec_znx_sub;
+	vt->pvda_znx_automorphism          = cuda_znx_automorphism;
+	vt->pvda_vec_znx_automorphism      = cuda_vec_znx_automorphism;
+	vt->pvda_vec_znx_rotate            = cuda_vec_znx_rotate;
+	// pvda_module_extract_nn, the RNG and number-theory entries stay the spqlios/CPU ones
+}
