@@ -444,7 +444,7 @@ int main(int argc, char* argv[])
 	double sigma8       = ldexp(1.0, 2 - 8 * KAPPABASE);
 	double sigma5       = ldexp(1.0, 2 - 5 * KAPPABASE);
 	double sigma6       = ldexp(1.0, 2 - 6 * KAPPABASE);
-	PvdaBackend* module = pvda_new_spqlios_backend(NBASE);
+	PvdaBackend* module = pvda_new_backend((PvdaBackendConfig){.nn = NBASE});
 
 	// Automorphism keys
 	double auto_key_sigma = sigma8;
