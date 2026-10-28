@@ -84,10 +84,10 @@ static void assert_equal(const int64_t* exp, const int64_t* obs, size_t n_elems,
 
 typedef int (*BinOp)(const PvdaBackend*, ZnxVec*, const ZnxVec*, const ZnxVec*);
 
-// res (5 limbs, stride 2N view) = a (3 limbs) op b (4 limbs, stride 3N view)
-static void check_binary(BinOp op, const char* name, int on_gpu)
+// res (res_l limbs, stride 2N view) = a (3 limbs) op b (4 limbs, stride 3N view)
+static void check_binary(BinOp op, const char* name, int on_gpu, uint64_t res_l)
 {
-	const uint64_t res_l = 5, a_l = 3, b_l = 4;
+	const uint64_t a_l = 3, b_l = 4;
 	const int64_t res_sl = 2 * NN, a_sl = NN, b_sl = 3 * NN;
 	int64_t* res0  = random_vec(res_l * res_sl, 8);
 	int64_t* a     = random_vec(a_l * a_sl, 20);
@@ -112,11 +112,13 @@ static void check_binary(BinOp op, const char* name, int on_gpu)
 
 Test(gpu_vtable, add_sub_strided_sized)
 {
+	// A result longer than the inputs, and shorter (only its first limbs of the inputs are read)
 	for (int on_gpu = 0; on_gpu <= 1; ++on_gpu)
-	{
-		check_binary(pvda_vec_znx_add, "add", on_gpu);
-		check_binary(pvda_vec_znx_sub, "sub", on_gpu);
-	}
+		for (uint64_t res_l = 2; res_l <= 5; res_l += 3)
+		{
+			check_binary(pvda_vec_znx_add, "add", on_gpu, res_l);
+			check_binary(pvda_vec_znx_sub, "sub", on_gpu, res_l);
+		}
 }
 
 static const char* unary_names[] = {"negate", "normalize", "automorphism", "rotate"};
@@ -136,14 +138,17 @@ static int unary(const PvdaBackend* module, int op, ZnxVec* res, const ZnxVec* a
 	}
 }
 
-// res (6 limbs, stride 2N view) = op(a) (4 limbs)
+// res (6 limbs, stride 2N view) = op(a) (4 limbs), and res (3 limbs) = op(a) (4 limbs, stride 2N view)
 Test(gpu_vtable, negate_normalize_automorphism_rotate)
 {
-	const uint64_t res_l = 6, a_l = 4;
-	const int64_t res_sl = 2 * NN, a_sl = NN;
-	for (int on_gpu = 0; on_gpu <= 1; ++on_gpu)
+	const uint64_t res_ls[2] = {6, 3}, a_l = 4;
+	const int64_t res_sls[2] = {2 * NN, NN}, a_sls[2] = {NN, 2 * NN};
+	for (int t = 0; t < 4; ++t)  // configuration t / 2, operands in GPU memory when t is odd
 		for (int op = 0; op < 4; ++op)
 		{
+			const int c = t / 2, on_gpu = t % 2;
+			const uint64_t res_l = res_ls[c];
+			const int64_t res_sl = res_sls[c], a_sl = a_sls[c];
 			int64_t* res0  = random_vec(res_l * res_sl, 8);
 			int64_t* a     = random_vec(a_l * a_sl, 30);
 			int64_t* g_res = place(res0, res_l * res_sl, on_gpu);
@@ -217,13 +222,16 @@ Test(gpu_vtable, znx_automorphism)
 	}
 }
 
-// a (3 limbs, stride 2N) -> DFT (4 limbs) -> back (4 limbs, stride 2N view): a, then a zero limb
+// a (3 or 5 limbs, stride 2N) -> DFT (4 limbs) -> back (4 limbs, stride 2N view): the first limbs of a,
+// then zero limbs
 Test(gpu_vtable, dft_idft_round_trip)
 {
-	const uint64_t a_l = 3, res_l = 4;
+	const uint64_t res_l = 4;
 	const int64_t a_sl = 2 * NN, back_sl = 2 * NN;
-	for (int on_gpu = 0; on_gpu <= 1; ++on_gpu)
+	for (int t = 0; t < 4; ++t)  // a of 3 then 5 limbs, operands in GPU memory when t is odd
 	{
+		const uint64_t a_l = t < 2 ? 3 : 5;
+		const int on_gpu   = t % 2;
 		int64_t* a      = random_vec(a_l * a_sl, 30);
 		int64_t* back0  = random_vec(res_l * back_sl, 8);
 		int64_t* g_a    = place(a, a_l * a_sl, on_gpu);
@@ -288,9 +296,12 @@ Test(gpu_vtable, dft_add)
 // each followed by idft, against spqlios
 Test(gpu_vtable, vector_matrix_products)
 {
-	const uint64_t nrows = 4, ncols = 3, a_l = 3, res_size = 5;
-	for (int on_gpu = 0; on_gpu <= 1; ++on_gpu)
+	const uint64_t nrows = 4, ncols = 3, res_size = 5;
+	// a with fewer limbs than the matrix rows, and with more (only its first nrows limbs are read)
+	for (int t = 0; t < 4; ++t)  // a of 3 then 6 limbs, operands in GPU memory when t is odd
 	{
+		const uint64_t a_l = t < 2 ? 3 : 6;
+		const int on_gpu   = t % 2;
 		int64_t* mat   = random_vec(nrows * ncols * NN, 8);
 		int64_t* a     = random_vec(a_l * NN, 8);
 		int64_t* g_mat = place(mat, nrows * ncols * NN, on_gpu);
@@ -360,9 +371,12 @@ Test(gpu_vtable, vector_matrix_products)
 
 Test(gpu_vtable, scalar_vector_products)
 {
-	const uint64_t a_l = 3, res_size = 4;
-	for (int on_gpu = 0; on_gpu <= 1; ++on_gpu)
+	const uint64_t res_size = 4;
+	// a with fewer limbs than the result, and with more (only its first res_size limbs are read)
+	for (int t = 0; t < 4; ++t)  // a of 3 then 6 limbs, operands in GPU memory when t is odd
 	{
+		const uint64_t a_l = t < 2 ? 3 : 6;
+		const int on_gpu   = t % 2;
 		int64_t* u   = random_vec(NN, 8);
 		int64_t* a   = random_vec(a_l * NN, 8);
 		int64_t* g_u = place(u, NN, on_gpu);

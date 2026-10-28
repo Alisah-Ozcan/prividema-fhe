@@ -46,4 +46,25 @@ void pvda_gpu_zero(int64_t* dst, size_t n_elements)
 	    [&]() -> void { CUDA_CHECK(cudaMemsetAsync(dst, 0, n_elements * sizeof(int64_t), gpu_active_stream)); });
 }
 
+int64_t* pvda_gpu_upload_limbs(const int64_t* host_ptr, int64_t host_stride, size_t limbs, size_t n)
+{
+	return pvda_gpu_guard([&]() -> int64_t* {
+		Data64s* d_ptr = (Data64s*)pvda_device_alloc_bytes(limbs * n * sizeof(int64_t));
+		CUDA_CHECK(cudaMemcpy2DAsync(d_ptr, n * sizeof(int64_t), host_ptr, (size_t)host_stride * sizeof(int64_t),
+		                             n * sizeof(int64_t), limbs, cudaMemcpyHostToDevice, gpu_active_stream));
+		return (int64_t*)d_ptr;
+	});
+}
+
+void pvda_gpu_download_limbs(int64_t* host_ptr, int64_t host_stride, const int64_t* device_ptr, size_t limbs,
+                             size_t n)
+{
+	return pvda_gpu_guard([&]() -> void {
+		// Synchronous, like pvda_gpu_download: callers read the host data on return
+		CUDA_CHECK(cudaMemcpy2DAsync(host_ptr, (size_t)host_stride * sizeof(int64_t), device_ptr, n * sizeof(int64_t),
+		                             n * sizeof(int64_t), limbs, cudaMemcpyDeviceToHost, gpu_active_stream));
+		CUDA_CHECK(cudaStreamSynchronize(gpu_active_stream));
+	});
+}
+
 }  // extern "C"

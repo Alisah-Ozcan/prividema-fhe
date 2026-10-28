@@ -64,6 +64,16 @@ void pvda_gpu_copy(int64_t* dst, const int64_t* src, size_t n_elements);
 // Zero n_elements int64_t of device memory.
 void pvda_gpu_zero(int64_t* dst, size_t n_elements);
 
+// Allocate a device buffer of limbs * n int64_t and upload into it, contiguously, the limbs limbs of n
+// coefficients of a host limb vector of stride host_stride (the gaps between the limbs are not copied).
+// Caller must release the returned pointer with pvda_gpu_free.
+int64_t* pvda_gpu_upload_limbs(const int64_t* host_ptr, int64_t host_stride, size_t limbs, size_t n);
+
+// Download the limbs contiguous limbs of n coefficients of device_ptr into a host limb vector of stride
+// host_stride, leaving the gaps between its limbs untouched. Returns once the data is on the host.
+void pvda_gpu_download_limbs(int64_t* host_ptr, int64_t host_stride, const int64_t* device_ptr, size_t limbs,
+                             size_t n);
+
 
 #ifdef __cplusplus
 }
