@@ -51,8 +51,8 @@ class NTTParameterGenerator {
 		Ninverse64 n_inv_;
 	};
 
-	const Modulus64 carrier_prime_ = Modulus64(1152921504634109953ULL);
-	const Data64 root_of_unity_    = 1341959173301ULL;
+	const Modulus64 carrier_prime_ = Modulus64(576460752364240897ULL);
+	const Data64 root_of_unity_    = 518483636987702190ULL;
 	std::unordered_map<size_t, NTTInfo> cache_;
 	std::mutex mtx_;
 };
