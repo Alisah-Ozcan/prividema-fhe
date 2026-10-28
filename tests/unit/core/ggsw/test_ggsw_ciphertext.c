@@ -240,8 +240,7 @@ PvdaParamTest(new_ggsw_dft, basic, default_params_fn)
 	// Variables
 	GGSWCiphertextPrep* ggsw_prep = new_ggsw_prep(params_ggsw);
 
-	// Asserts new_ggsw_dft worked
-	cr_assert(eq(int, ggsw_prep->mat != NULL, 1));
+	// Asserts new_ggsw_dft worked (the prepared matrix is allocated by ggsw_prepare)
 	cr_assert(eq(int, ggsw_prep->params != NULL, 1));
 
 	// Clean up

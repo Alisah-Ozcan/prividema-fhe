@@ -147,14 +147,12 @@ cleanup:
 
 GGSWCiphertextPrep* new_ggsw_prep(const GGSWParams* params_ggsw)
 {
-	GGSWCiphertextPrep* ggsw_mat_dft = malloc(sizeof(GGSWCiphertextPrep));
+	GGSWCiphertextPrep* ggsw_mat_dft = calloc(1, sizeof(GGSWCiphertextPrep));
 	CHECK_ALLOC(ggsw_mat_dft, "malloc in new_ggsw_dft");
 
 	ggsw_mat_dft->params = params_ggsw;
 
-	// Initializes  the bivGGSW ciphertext with 0s
-	ggsw_mat_dft->mat = calloc(2 * ggsw_coef_number_dft(params_ggsw), sizeof(double));
-	CHECK_ALLOC(ggsw_mat_dft->mat, "calloc in new_ggsw_dft");
+	// The prepared matrix is allocated by the backend that prepares it (ggsw_prepare)
 
 	return ggsw_mat_dft;
 cleanup:
@@ -165,7 +163,7 @@ cleanup:
 void delete_ggsw_prep(GGSWCiphertextPrep* ggsw_prep)
 {
 	if (!ggsw_prep) return;
-	free(ggsw_prep->mat);
+	if (ggsw_prep->mat) pvda_delete_vmp_pmat(ggsw_prep->module, ggsw_prep->mat);
 	free(ggsw_prep);
 }
 
@@ -175,6 +173,15 @@ int ggsw_prepare(const PvdaBackend* module, GGSWCiphertextPrep* ggsw_prep, const
 
 	size_t nrows = ggsw_prep->params->ciphertext_nb_limbs_tilde;
 	size_t ncols = glwe_params_n_limbs(ggsw_prep->params->params_glwe);
+
+	if (!ggsw_prep->mat)
+	{
+		ggsw_prep->mat = pvda_new_vmp_pmat(module, nrows, ncols);
+		CHECK_ALLOC(ggsw_prep->mat, "ggsw_prepare(): prepared matrix allocation failed");
+		ggsw_prep->module = module;
+	}
+	else if (ggsw_prep->module != module)
+		RAISE_ERROR("ggsw_prepare(): the prepared GGSW was allocated by another backend");
 
 	CHECK_CALL(pvda_vmp_prepare_contiguous(module, ggsw_prep->mat, ggsw_ct->mat, nrows, ncols),
 	           "ggsw_prepare(): VMP prepare failed");

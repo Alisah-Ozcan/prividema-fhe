@@ -129,18 +129,23 @@ typedef struct ggsw_ciphertext_prepared
 	/// GGSW parameters.
 	const GGSWParams* params;
 
-	/// Prepared matrix (opaque representation)
+	/// Prepared matrix (opaque representation), allocated by the backend on the first ggsw_prepare
 	BE_PolyMatVmpPrep* mat;
+
+	/// Backend that allocated mat (NULL until the first ggsw_prepare)
+	const PvdaBackend* module;
 
 } GGSWCiphertextPrep;
 
 /**
- * @brief Creates a zero-initialized GGSWCiphertextPrep
+ * @brief Creates a GGSWCiphertextPrep
+ *
+ * Its prepared matrix is allocated by the backend that first prepares it (ggsw_prepare).
  *
  * @param params_ggsw The GGSW parameters.
  *
  * @retval NULL if malloc failed inside the function.
- * @retval non-NULL The Allocated GGSW ciphertext filled with 0 otherwise.
+ * @retval non-NULL The Allocated prepared GGSW ciphertext otherwise.
  */
 GGSWCiphertextPrep* new_ggsw_prep(const GGSWParams* params_ggsw);
 

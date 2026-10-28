@@ -102,8 +102,8 @@ int ggsw_external_product_unprepared(const PvdaBackend* module,
 
 	BE_PolyMatVmpPrep* ggsw_pmat  = NULL;  // Prepared bivGGSW ciphertext
 	BE_PolyVecDFT* result_dft = NULL;  // ExternalProduct(glwe, ggsw)
-	ggsw_pmat             = malloc(ggsw_bytes(ggsw->params));
-	result_dft            = malloc(glwe_params_bytes(ggsw->params->params_glwe));
+	ggsw_pmat             = pvda_new_vmp_pmat(module, nrows, ncols_in);
+	result_dft            = pvda_new_vec_znx_dft(module, ncols_out);
 
 	CHECK_ALLOC(ggsw_pmat, "mat_dft's malloc failed in ggsw_external_product");
 	CHECK_ALLOC(result_dft, "result's malloc failed in ggsw_external_product");
@@ -122,8 +122,8 @@ int ggsw_external_product_unprepared(const PvdaBackend* module,
 	status = 0;
 
 cleanup:
-	delete_biv_dft(result_dft);
-	free(ggsw_pmat);
+	pvda_delete_vec_znx_dft(module, result_dft);
+	pvda_delete_vmp_pmat(module, ggsw_pmat);
 
 	return status;
 }
